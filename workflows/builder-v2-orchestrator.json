@@ -1,0 +1,1139 @@
+{
+  "name": "Orchestrator",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "d99e32de-afea-4410-bae5-ea3ba78fa3f2",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -8640,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').first().json.message.from.id }}",
+        "text": "⏳ Ищу шаблоны...",
+        "additionalFields": {
+          "<AIRTABLE_BASE_ID>": false
+        }
+      },
+      "id": "2d2f4931-c66b-449c-ac94-d52ce67d4cce",
+      "name": "Telegram Send Message - Searching",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -7296,
+        -352
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "fC17R3GSnBvKp4Ow",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/fC17R3GSnBvKp4Ow",
+          "cachedResultName": "RAG Template Search"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [
+            "1"
+          ],
+          "schema": [
+            {
+              "id": "1",
+              "displayName": "1",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "6171c1d1-2790-4e1f-99a5-778ae38d3832",
+      "name": "Execute Sub-workflow - RAG Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -6864,
+        -352
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const agentOutput = $input.first().json.output ||\n                    $input.first().json.templates;\nlet templates = [];\n\ntry {\n  if (Array.isArray(agentOutput)) {\n    templates = agentOutput;\n  } else if (typeof agentOutput === 'string') {\n    // Пробуем найти JSON массив в строке\n    const match = agentOutput.match(/\\[[\\s\\S]*\\]/);\n    if (match) {\n      templates = JSON.parse(match[0]);\n    }\n  }\n} catch (e) {\n  templates = [];\n}\n\n// Фильтрация: оставляем только ВЫСОКАЯ и СРЕДНЯЯ релевантность\ntemplates = templates.filter(t => {\n  if (!t || !t.filename) return false;\n  \n  const rel = (t.relevance || '').toUpperCase();\n  // Принимаем: ВЫСОКАЯ, СРЕДНЯЯ, HIGH, MEDIUM\n  return rel.includes('ВЫСОК') || \n         rel.includes('СРЕДН') || \n         rel === 'HIGH' || \n         rel === 'MEDIUM';\n});\n\n// Максимум 3 шаблона\ntemplates = templates.slice(0, 3);\n\nreturn [{\n  json: {\n    templates,\n    hasTemplates: templates.length > 0,\n    chatId: $('Парсинг решения').first().json.chatId,\n    businessTask: $('Парсинг решения').first().json.businessTask\n  }\n}];"
+      },
+      "id": "2de9f575-1797-4d41-b8ad-35339b183cbf",
+      "name": "Code - Parse RAG Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -6640,
+        -352
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "id-1",
+              "leftValue": "={{ $json.hasTemplates }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "dd9d0ebe-7bff-43fb-bfc9-6c35792cecfa",
+      "name": "IF - Has Templates?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -6416,
+        -352
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $input.item.json;\nlet url = item.url || '';\n\n// Google Drive: /file/d/ID/view → download link\nconst match = url.match(/\\/file\\/d\\/([^/]+)/);\nif (match) {\n  url = 'https://drive.google.com/uc?export=download&id=' + match[1];\n}\n\nreturn { json: { ...item, downloadUrl: url } };"
+      },
+      "id": "6d1cb834-62d6-448f-a3d8-48e553bd3147",
+      "name": "Code - Prepare Download URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -5552,
+        -512
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.downloadUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "49f66217-c740-4d3e-a415-fff6fc6135d5",
+      "name": "HTTP Request - Download Template JSON",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -5328,
+        -512
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "PeFWdLtLczCxqDFV",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/PeFWdLtLczCxqDFV",
+          "cachedResultName": "Tester"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflowJson": "={{ $json }}",
+            "businessTask": "={{ $('Edit Fields - Prepare RAG Input').item.json.businessTask }}",
+            "templateName": "={{ $('Code - Prepare Download URL').item.json.filename }}",
+            "templateUrl": "={{ $('Code - Prepare Download URL').item.json.url }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflowJson",
+              "displayName": "workflowJson",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object"
+            },
+            {
+              "id": "businessTask",
+              "displayName": "businessTask",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "templateName",
+              "displayName": "templateName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "templateUrl",
+              "displayName": "templateUrl",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {}
+      },
+      "id": "4bae8327-c75b-43a3-b1b7-6c5849ff12b5",
+      "name": "Execute Sub-workflow - Tester",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -5104,
+        -512
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const allResults = $input.all();\nconst passed = [];\nconst failed = [];\n\nfor (const item of allResults) {\n  const r = item.json;\n  if (r.passed) passed.push(r);\n  else failed.push(r);\n}\n\npassed.sort((a, b) => (b.score || 0) - (a.score || 0));\n\nreturn [{\n  json: {\n    passed,\n    failed,\n    hasPassed: passed.length > 0,\n    chatId: $('Парсинг решения').first().json.chatId,\n    businessTask: $('Парсинг решения').first().json.businessTask\n  }\n}];"
+      },
+      "id": "c8cab513-8687-4124-84e2-5aba5e66698a",
+      "name": "Code - Aggregate Test Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4880,
+        -512
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "id-1",
+              "leftValue": "={{ $json.hasPassed }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e8a2fb85-fed4-4539-a0ef-3983c7246d66",
+      "name": "IF - Has Passed Templates?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -4656,
+        -512
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const passed = $input.first().json.passed;\nlet msg = '<b>✅ Найдены подходящие шаблоны:</b>\\n\\n';\n\nfor (let i = 0; i < passed.length; i++) {\n  const t = passed[i];\n  \n  msg += `<b>${i + 1}. ${t.templateName || 'Unknown'}</b>\\n`;\n  \n  // Тип теста\n  msg += `📋 <i>${t.testType || 'Анализ'}</i>\\n`;\n  \n  // Оценка с визуальной шкалой\n  const score = t.score || 0;\n  const bars = Math.round(score / 10);\n  const scoreBar = '█'.repeat(bars) + '░'.repeat(10 - bars);\n  msg += `📊 Оценка: ${score}/100 [${scoreBar}]\\n`;\n  \n  // Краткое резюме\n  msg += `💬 ${t.summary || ''}\\n`;\n  \n  // Тип триггера\n  const triggerShort = (t.triggerType || '').replace('n8n-nodes-base.', '');\n  msg += `⚡ Триггер: ${triggerShort}\\n`;\n  \n  // Проблемы если есть\n  if (t.issues && t.issues.length > 0) {\n    msg += `⚠️ Проблемы:\\n`;\n    t.issues.forEach(issue => {\n      msg += `  • ${issue}\\n`;\n    });\n  }\n  \n  // Детальные проверки (только провалившиеся)\n  if (t.checks && t.checks.length > 0) {\n    const failedChecks = t.checks.filter(c => c.startsWith('❌') || c.startsWith('⚠️'));\n    if (failedChecks.length > 0) {\n      msg += `🔍 Замечания:\\n`;\n      failedChecks.forEach(check => {\n        msg += `  ${check}\\n`;\n      });\n    }\n  }\n  \n  // Ссылка на шаблон\n  if (t.templateUrl) {\n    msg += `🔗 <a href=\"${t.templateUrl}\">Скачать шаблон</a>\\n`;\n  }\n  \n  msg += '\\n';\n}\n\n// Рекомендация (лучший шаблон)\nif (passed.length > 1) {\n  const best = passed[0];\n  msg += `💡 <b>Рекомендуем:</b> ${best.templateName}`;\n}\n\nmsg += '\\n🏗 Хотите кастомный воркфлоу? Напишите /build с описанием задачи';\n\nreturn [{ json: { message: msg, chatId: $input.first().json.chatId } }];"
+      },
+      "id": "7137d5b6-b6d1-4d86-8707-b22fe1b3bfaf",
+      "name": "Code - Format Success Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4416,
+        -624
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "<AIRTABLE_BASE_ID>": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "1a69840a-f597-4e6c-a95c-ba643600b0be",
+      "name": "Telegram Send Message - Success",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -4192,
+        -624
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "businessTask",
+              "value": "={{ $('Парсинг решения').first().json.businessTask }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "f9e75340-3038-4a97-a338-8256ea1d2de6",
+      "name": "Edit Fields - Prepare RAG Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -7088,
+        -352
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "templates",
+        "options": {}
+      },
+      "id": "41250f07-9c1e-47b1-986d-cddf83f7f3b6",
+      "name": "Split Out - Process Templates",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        -5776,
+        -512
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7ebaaa6e-5261-4fa9-9f25-0642ef72579a",
+              "name": "sessionId",
+              "value": "={{ String($json.message.chat.id) }}",
+              "type": "string"
+            },
+            {
+              "id": "faa8e309-1859-4a7a-92da-04c4d49e7683",
+              "name": "chatInput",
+              "value": "={{ $json.message.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -8432,
+        -128
+      ],
+      "id": "f3dd5409-e38f-4da6-b44f-da7325997bfe",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5.4",
+          "mode": "list",
+          "cachedResultName": "gpt-5.4"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -8176,
+        48
+      ],
+      "id": "537d212f-b407-4e30-a176-d4535da810d7",
+      "name": "OpenAI Chat Model"
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        -8080,
+        48
+      ],
+      "id": "0ec949c9-957b-4216-bcc1-6a42ffda2711",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "Ты — маршрутизатор бота для работы с n8n-воркфлоу. Твоя единственная задача — определить намерение пользователя и вернуть JSON.\n\nФОРМАТ ОТВЕТА — ВСЕГДА строго JSON, без текста до и после:\n{\n  \"action\": \"search\" | \"build\" | \"chat\",\n  \"businessTask\": \"описание задачи (только для search и build)\",\n  \"userMessage\": \"текст для пользователя (только для chat)\"\n}\n\n═══════════════════════════════════════\nПРАВИЛА КЛАССИФИКАЦИИ (читай внимательно)\n═══════════════════════════════════════\n\naction = \"build\" ЕСЛИ выполняется ХОТЯ БЫ ОДНО условие:\n- Сообщение начинается с /build\n- Сообщение содержит метку \"Бизнес-запрос\" или \"Бизнес запрос\"\n- Подробное описание (более 30 слов) с логикой/шагами/условиями\n- Упомянуты конкретные сервисы + описана логика взаимодействия между ними\n- Есть нумерованные шаги, условия \"если/иначе\", описание триггеров\n→ businessTask = ПОЛНЫЙ текст задачи пользователя (ничего не убирай, сохрани все детали)\n→ userMessage = \"\"\n\naction = \"search\" ЕСЛИ:\n- Пишет /search + описание\n- Кратко описывает задачу (до 30 слов) без детальной логики\n- Называет тип интеграции: \"найди шаблон для X\", \"есть ли воркфлоу для Y\"\n→ businessTask = описание задачи\n→ userMessage = \"\"\n\naction = \"chat\" ТОЛЬКО ЕСЛИ:\n- /start или /info → расскажи о боте\n- /build без описания (менее 5 слов после команды)\n- /search без описания\n- Явный оффтоп: вопросы не про автоматизацию, случайные символы, приветствие без задачи\n→ businessTask = \"\"\n→ userMessage = текст ответа\n\nВАЖНО: Если сомневаешься — выбирай build (НЕ chat).\nЛюбое подробное описание с логикой = build, даже без команды /build.\n\n═══════════════\nШАБЛОНЫ userMessage (только для chat)\n═══════════════\n\nДля /info и /start:\n\"🤖 *n8n Workflow Assistant*\\n\\nЯ помогу найти или создать n8n-воркфлоу.\\n\\n*Команды:*\\n🔍 Опишите задачу — найду готовый шаблон\\n🏗 /build [описание] — создать кастомный воркфлоу\\nℹ️ /info — эта справка\\n\\n*Примеры:*\\n• Автоматизация отправки из Google Sheets в Telegram\\n• /build Когда приходит заявка через форму, данные в Sheets, уведомление в Telegram\"\n\nДля /build без описания:\n\"🏗 Чтобы создать воркфлоу, опишите задачу подробно.\\n\\nУкажите:\\n• Какие сервисы (Google Sheets, Telegram, Slack, CRM...)\\n• Триггер (webhook, расписание, событие)\\n• Какие данные обрабатываются\\n• Что на выходе\\n\\n*Пример:*\\n/build Когда в Google Form приходит заявка, данные пишутся в Google Sheets, уведомление в Telegram канал менеджеров\"\n\nДля явного оффтопа:\n\"Я специализированный бот для n8n. Опишите задачу автоматизации или напишите /info\"\n\nВАЖНО:\n- ВСЕГДА отвечай ТОЛЬКО JSON\n- userMessage: Telegram Markdown (*жирный*, _курсив_)\n- Отвечай на русском"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -8176,
+        -128
+      ],
+      "id": "e982c19b-1209-4c3c-9421-114ae0f05c25",
+      "name": "Роутер"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.output || '';\nlet decision;\n\ntry {\n  if (typeof raw === 'string') {\n    const match = raw.match(/\\{[\\s\\S]*\\}/);\n    if (match) {\n      decision = JSON.parse(match[0]);\n    }\n  } else if (typeof raw === 'object') {\n    decision = raw;\n  }\n} catch (e) {\n  decision = null;\n}\n\n// Fallback: если агент не вернул валидный JSON — считаем chat\nif (!decision || !decision.action) {\n  decision = {\n    action: 'chat',\n    businessTask: '',\n    userMessage: typeof raw === 'string' ? raw : 'Произошла ошибка. Попробуйте /info'\n  };\n}\n\n// Валидация action\nconst validActions = ['search', 'build', 'chat'];\nif (!validActions.includes(decision.action)) {\n  decision.action = 'chat';\n}\n\n// === ЗАЩИТНЫЙ ЭВРИСТИК ===\n// Если action=chat, но сообщение пользователя длинное и содержит ключевые слова автоматизации —\n// переопределяем на build\nconst originalText = $('Edit Fields').first().json.chatInput || '';\nconst wordCount = originalText.split(/\\s+/).length;\nconst automationKeywords = ['бот', 'пост', 'сторис', 'публикац', 'телеграм', 'vk', 'канал', \n  'воркфлоу', 'автомат', 'интеграц', 'webhook', 'триггер', 'шаг', 'логика', 'если', 'бизнес'];\nconst hasAutomationKeyword = automationKeywords.some(kw => originalText.toLowerCase().includes(kw));\n\nif (decision.action === 'chat' && wordCount > 25 && hasAutomationKeyword) {\n  decision.action = 'build';\n  decision.businessTask = originalText;\n  decision.userMessage = '';\n}\n\nconst chatId = $('Telegram Trigger').first().json.message.from.id;\n\nreturn [{\n  json: {\n    action: decision.action,\n    businessTask: decision.businessTask || '',\n    userMessage: decision.userMessage || '',\n    chatId: chatId\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -7824,
+        -128
+      ],
+      "id": "4444f1d3-baa9-4ddc-bc6b-f0e8a73c579d",
+      "name": "Парсинг решения"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "search",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "18a8f2d9-a1c3-4b77-ada1-db9291feab26"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "21e9cd61-f87a-45f1-be2c-a36a91d0d426",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "build",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "8e3c6d67-9252-499e-9d26-627b5606f734",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "chat",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -7600,
+        -144
+      ],
+      "id": "f9695982-5c26-418e-8e70-c55e2fb5acec",
+      "name": "Маршрутизация"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Парсинг решения').first().json.chatId }}",
+        "text": "😔 К сожалению, подходящих шаблонов не найдено в базе.  🏗 Хотите создать кастомный воркфлоу? Напишите /build и подробно опишите задачу.  *Пример:* /build Когда в Google Form приходит заявка, данн��е пишутся в Google Sheets, уведомление в Telegram",
+        "additionalFields": {
+          "<AIRTABLE_BASE_ID>": false,
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "4210303a-91b7-480a-b398-c081fe430519",
+      "name": "Telegram - Не найдено",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -5984,
+        -336
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Парсинг решения').first().json.chatId }}",
+        "text": "🏗 Генерирую воркфлоу... Это может занять несколько минут.",
+        "additionalFields": {
+          "<AIRTABLE_BASE_ID>": false,
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "6e581161-0e1e-43d8-a612-fe9dfad8caf9",
+      "name": "Генерирую...",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -7296,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "4891c1c6-f351-4b63-891c-9832ddfb3ba7",
+              "name": "businessTask",
+              "value": "={{ $('Парсинг решения').first().json.businessTask }}",
+              "type": "string"
+            },
+            {
+              "id": "201f3f0a-4856-416e-84cd-15a9bf0a8b15",
+              "name": "failedTemplates",
+              "value": "={{ [] }}",
+              "type": "array"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -7088,
+        -128
+      ],
+      "id": "d0c15f63-40e4-4b96-b64d-7c1566200b8b",
+      "name": "Edit Fields - Prepare Build Input"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "RJvVo303Gv1EK5yk",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/RJvVo303Gv1EK5yk",
+          "cachedResultName": "Builder"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "businessTask": "={{ $json.businessTask }}",
+            "failedTemplates": "={{ $json.failedTemplates }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "businessTask",
+              "displayName": "businessTask",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "failedTemplates",
+              "displayName": "failedTemplates",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "array"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "2ce229b2-f258-4e53-b648-bdf3c588821b",
+      "name": "Execute Sub-workflow - Builder (Build)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -6864,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "PeFWdLtLczCxqDFV",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/PeFWdLtLczCxqDFV",
+          "cachedResultName": "Tester"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflowJson": "={{ $json.workflowJson }}",
+            "templateName": "={{ $json.workflowName || 'Generated Workflow' }}",
+            "businessTask": "={{ $json.businessTask }}",
+            "templateUrl": "="
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflowJson",
+              "displayName": "workflowJson",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object"
+            },
+            {
+              "id": "businessTask",
+              "displayName": "businessTask",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "templateName",
+              "displayName": "templateName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "templateUrl",
+              "displayName": "templateUrl",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "e8c10941-a823-423f-91cb-ba85ea20e0e3",
+      "name": "Execute Sub-workflow - Tester (Build)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -6640,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "id-1",
+              "leftValue": "={{ $json.passed }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "dcf42ab1-3016-42af-b17d-fd0e90d7256d",
+      "name": "IF - Build Passed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -6416,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Парсинг решения').first().json.chatId }}",
+        "text": "=❌ Не удалось создать рабочий воркфлоу. Попробуйте переформулировать задачу или добавить больше деталей.",
+        "additionalFields": {
+          "<AIRTABLE_BASE_ID>": false,
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "353d1b01-9cd6-4f4e-8ffe-3c95f49b5dc0",
+      "name": "Telegram - Build Failure",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -5984,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Парсинг решения').first().json.chatId }}",
+        "text": "={{ $('Парсинг решения').first().json.userMessage }}",
+        "additionalFields": {
+          "<AIRTABLE_BASE_ID>": false,
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "d6e7b383-10e8-4a20-872e-e88d46d6123a",
+      "name": "Telegram - Ответ чата",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -7296,
+        96
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Парсинг решения').first().json.chatId }}",
+        "text": "=😔 Найденные шаблоны не прошли проверку совместимости с твоей задачей.\n\n🏗 Хочешь кастомный воркфлоу под эту задачу? Напиши:\n/build [описание задачи]\n\nПример:\n/build Когда в Google Form приходит заявка, данные пишутся в Google Sheets и уходит уведомление в Telegram",
+        "additionalFields": {
+          "<AIRTABLE_BASE_ID>": false,
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "05e11638-fa00-410c-8fa5-453c6f5d509c",
+      "name": "Telegram - Build Failure1",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -4416,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendDocument",
+        "chatId": "={{ $('Парсинг решения').first().json.chatId }}",
+        "binaryData": true,
+        "binaryPropertyName": "document",
+        "additionalFields": {
+          "caption": "={{ '✅ Воркфлоу создан!\\n📊 Оценка: ' + $json.score + '/100\\n💬 ' + $json.summary }}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -5904,
+        -144
+      ],
+      "id": "b10fa20e-2124-45fb-8f2a-673206d99869",
+      "name": "Send a document"
+    },
+    {
+      "parameters": {
+        "jsCode": "const wf = $input.first().json.workflowJson;\nconst content = JSON.stringify(wf, null, 2);\n\nreturn [{\n  json: {\n    chatId: $('Парсинг решения').first().json.chatId,\n    score: $input.first().json.score,\n    summary: $input.first().json.summary\n  },\n  binary: {\n    document: {\n      data: Buffer.from(content).toString('base64'),\n      mimeType: 'application/json',\n      fileName: 'workflow.json'\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -6160,
+        -144
+      ],
+      "id": "f6cf6630-e516-4fee-919a-d3040da8ed3d",
+      "name": "Code in JavaScript"
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Send Message - Searching": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields - Prepare RAG Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields - Prepare RAG Input": {
+      "main": [
+        [
+          {
+            "node": "Execute Sub-workflow - RAG Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Sub-workflow - RAG Agent": {
+      "main": [
+        [
+          {
+            "node": "Code - Parse RAG Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Parse RAG Result": {
+      "main": [
+        [
+          {
+            "node": "IF - Has Templates?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Has Templates?": {
+      "main": [
+        [
+          {
+            "node": "Split Out - Process Templates",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram - Не найдено",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Prepare Download URL": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Download Template JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Download Template JSON": {
+      "main": [
+        [
+          {
+            "node": "Execute Sub-workflow - Tester",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Sub-workflow - Tester": {
+      "main": [
+        [
+          {
+            "node": "Code - Aggregate Test Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Aggregate Test Results": {
+      "main": [
+        [
+          {
+            "node": "IF - Has Passed Templates?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Has Passed Templates?": {
+      "main": [
+        [
+          {
+            "node": "Code - Format Success Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram - Build Failure1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Format Success Message": {
+      "main": [
+        [
+          {
+            "node": "Telegram Send Message - Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out - Process Templates": {
+      "main": [
+        [
+          {
+            "node": "Code - Prepare Download URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Роутер",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Роутер",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Роутер",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Роутер": {
+      "main": [
+        [
+          {
+            "node": "Парсинг решения",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Парсинг решения": {
+      "main": [
+        [
+          {
+            "node": "Маршрутизация",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Маршрутизация": {
+      "main": [
+        [
+          {
+            "node": "Telegram Send Message - Searching",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Генерирую...",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram - Ответ чата",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Генерирую...": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields - Prepare Build Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields - Prepare Build Input": {
+      "main": [
+        [
+          {
+            "node": "Execute Sub-workflow - Builder (Build)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Sub-workflow - Builder (Build)": {
+      "main": [
+        [
+          {
+            "node": "Execute Sub-workflow - Tester (Build)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Sub-workflow - Tester (Build)": {
+      "main": [
+        [
+          {
+            "node": "IF - Build Passed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Build Passed?": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram - Build Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Send a document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  }
+}

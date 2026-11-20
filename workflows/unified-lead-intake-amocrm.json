@@ -1,0 +1,654 @@
+{
+  "name": "Unified Lead Intake: Validator → amoCRM → Telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 📋 Архитектура решения\n\n**Источники заявок:**\n- 🐍 Python TG-бот (отдельный сервер)\n- 🌐 PHP-сайт\n\n**Что делает этот воркфлоу:**\n1. Принимает заявки на единый webhook\n2. ✅ Валидатор: проверка дубля по номеру\n3. 📝 Лог в Google Sheets\n4. 📤 Создание лида в amoCRM\n5. 💬 Дублирование в Telegram-чат\n\n**Решает проблемы:**\n- ❌ Бот не передавал в TG → теперь дублирует n8n\n- ❌ Дубли с PHP-сайта → ловит валидатор\n- ❌ Нет логов → всё пишется в Google Sheets",
+        "height": 400,
+        "width": 400,
+        "color": 6
+      },
+      "id": "e80500f9-bb8c-4cfd-81c8-47414cfa8291",
+      "name": "📋 Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -2224,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-intake",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": false
+        }
+      },
+      "id": "1493f0ca-6816-42d6-b553-c18b7d780403",
+      "name": "Webhook: Lead Intake",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1712,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🔌 Webhook URL\n\nПрописать в:\n- Python TG-боте (вместо прямого вызова amoCRM/TG)\n- PHP-сайте\n\n**Поля JSON:**\n```\n{\n  \"source\": \"tg_bot\" | \"php_site\",\n  \"name\": \"Иван Иванов\",\n  \"phone\": \"+7 900 000-00-00\",\n  \"comment\": \"текст заявки\",\n  \"username\": \"@ivan\" (опц.),\n  \"utm\": {} (опц.)\n}\n```",
+        "height": 360,
+        "width": 320,
+        "color": 4
+      },
+      "id": "e27a4e24-1a92-46cf-9bf9-c172a8e6a25e",
+      "name": "📌 Webhook Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1728,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "amocrm_subdomain",
+              "value": "your-company",
+              "type": "string"
+            },
+            {
+              "id": "c2",
+              "name": "amocrm_phone_field_id",
+              "value": 123456,
+              "type": "number"
+            },
+            {
+              "id": "c3",
+              "name": "tg_chat_id",
+              "value": "-1001234567890",
+              "type": "string"
+            },
+            {
+              "id": "c4",
+              "name": "gsheet_id",
+              "value": "YOUR_GOOGLE_SHEET_ID",
+              "type": "string"
+            },
+            {
+              "id": "c5",
+              "name": "gsheet_log_name",
+              "value": "Лог заявок",
+              "type": "string"
+            },
+            {
+              "id": "c6",
+              "name": "default_lead_price",
+              "value": 0,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "24c11d62-3e27-4d25-b1af-d5fe74e98281",
+      "name": "⚙️ Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1472,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## ⚙️ Заполнить перед запуском\n- `amocrm_subdomain` — поддомен amoCRM\n- `amocrm_phone_field_id` — ID поля «Телефон» в контактах amoCRM\n- `tg_chat_id` — ID чата для уведомлений (взять у @userinfobot)\n- `gsheet_id` — ID Google Sheets таблицы\n\n**Лист «Лог заявок» — колонки:**\ntimestamp | source | name | phone | comment | status | amo_lead_id | error | username",
+        "height": 260,
+        "width": 320,
+        "color": 7
+      },
+      "id": "454c587a-e1ea-4d6e-bd34-710f0e42e783",
+      "name": "⚙️ Config Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1504,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Нормализуем входящие данные с обоих источников\nconst body = $('Webhook: Lead Intake').item.json.body || $('Webhook: Lead Intake').item.json;\nconst cfg = $('⚙️ Config').first().json;\n\n// Нормализация телефона: убираем всё кроме цифр, приводим к формату +7XXXXXXXXXX\nlet phoneRaw = String(body.phone || body.tel || body.phonenumber || '').trim();\nlet phoneDigits = phoneRaw.replace(/\\D/g, '');\nif (phoneDigits.startsWith('8') && phoneDigits.length === 11) phoneDigits = '7' + phoneDigits.substring(1);\nif (phoneDigits.length === 10) phoneDigits = '7' + phoneDigits;\nconst phoneNormalized = phoneDigits ? '+' + phoneDigits : '';\n\nconst source = (body.source || 'unknown').toLowerCase();\nconst name = String(body.name || body.fullname || 'Без имени').trim();\nconst comment = String(body.comment || body.message || body.text || '').trim();\nconst username = String(body.username || '').trim();\n\n// Валидация: телефон обязателен\nconst valid = phoneNormalized.length >= 11;\n\nreturn {\n  json: {\n    source,\n    name,\n    phone: phoneNormalized,\n    phone_search: phoneDigits, // для поиска без + (Sheets иногда сохраняет так)\n    comment,\n    username,\n    valid,\n    received_at: new Date().toISOString(),\n    raw: body,\n    cfg\n  }\n};"
+      },
+      "id": "1b6a299b-4697-4ad8-ac93-855a8b9e93b1",
+      "name": "Normalize Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1216,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ccb7c059-ebac-4f3a-bbc3-c2ae451132eb",
+      "name": "Valid Phone?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -976,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "<AUTHENTICATION>",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('⚙️ Config').item.json.gsheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('⚙️ Config').item.json.gsheet_log_name }}",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "phone",
+              "lookupValue": "={{ $json.phone }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        }
+      },
+      "id": "1c752dfe-9210-45b1-b32c-ad4c6971c7d7",
+      "name": "Search Duplicate",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -720,
+        128
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Проверяем найден ли дубль\nconst lead = $('Normalize Lead').item.json;\nconst dupRow = $json;\n\n// Дубль если нашли строку с phone и status != 'duplicate' (чтоб не блочить вечно)\nconst isDuplicate = !!(dupRow && dupRow.phone && (dupRow.status === 'created' || dupRow.status === 'amo_failed'));\n\nreturn {\n  json: {\n    ...lead,\n    is_duplicate: isDuplicate,\n    original_lead_id: dupRow?.amo_lead_id || null,\n    original_timestamp: dupRow?.timestamp || null\n  }\n};"
+      },
+      "id": "fe4622d9-3263-4cdd-8ede-efe3c3a019c1",
+      "name": "Check Duplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.is_duplicate }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "822fa5ca-2697-46c9-9bd0-ac6881cbd36e",
+      "name": "Is Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -224,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🔴 Ветка ДУБЛЬ\n- Логируем как duplicate\n- Уведомляем в TG (чтобы видеть попытки)\n- Возвращаем 409\n- В amoCRM НЕ отправляем",
+        "width": 280,
+        "color": 2
+      },
+      "id": "8120212b-53fe-4c36-be53-06f2d3d410b3",
+      "name": "🔴 Dup Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        32,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "<AUTHENTICATION>",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('⚙️ Config').item.json.gsheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('⚙️ Config').item.json.gsheet_log_name }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $json.received_at }}",
+            "source": "={{ $json.source }}",
+            "name": "={{ $json.name }}",
+            "phone": "={{ $json.phone }}",
+            "comment": "={{ $json.comment }}",
+            "status": "duplicate",
+            "amo_lead_id": "",
+            "error": "={{ 'Дубль номера. Оригинал #' + ($json.original_lead_id || '?') + ' от ' + ($json.original_timestamp || '?') }}",
+            "username": "={{ $json.username }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "b81c677f-2574-409c-8fa8-da0596157d89",
+      "name": "Log Duplicate",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        32,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('⚙️ Config').item.json.tg_chat_id }}",
+        "text": "=⚠️ <b>Дубль заявки</b>\n\n👤 {{ $json.name }}\n📞 {{ $json.phone }}\n🔗 Источник: {{ $json.source }}\n💬 {{ $json.comment }}\n\n<i>Оригинал лида: #{{ $json.original_lead_id || '?' }} ({{ $json.original_timestamp || '?' }})</i>\n<i>В amoCRM не отправлено</i>",
+        "additionalFields": {
+          "<AIRTABLE_BASE_ID>": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "2e7d61b5-128e-4eb2-a715-35b9ca55a37a",
+      "name": "TG: Notify Duplicate",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        288,
+        32
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, error: 'duplicate', original_lead_id: $('Check Duplicate').item.json.original_lead_id }) }}",
+        "options": {
+          "responseCode": 409
+        }
+      },
+      "id": "ebb5e845-dd58-4d77-9ab6-387abcebb60a",
+      "name": "Respond 409",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        544,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🟢 Ветка НОВАЯ заявка\n1. POST в amoCRM /leads/complex\n2. Парсим ответ\n3. Лог в Sheets со status=created\n4. TG-уведомление\n5. Respond 200",
+        "height": 180,
+        "width": 280,
+        "color": 3
+      },
+      "id": "3b7ec27e-25a1-476a-a645-1545dd06e951",
+      "name": "🟢 New Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        32,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://{{ $('⚙️ Config').item.json.amocrm_subdomain }}.amocrm.ru/api/v4/leads/complex",
+        "authentication": "<AUTHENTICATION>",
+        "nodeCredentialType": "oAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([{ name: 'Заявка с ' + $json.source, price: $('⚙️ Config').item.json.default_lead_price, _embedded: { contacts: [{ name: $json.name, custom_fields_values: [{ field_id: $('⚙️ Config').item.json.amocrm_phone_field_id, values: [{ value: $json.phone, enum_code: 'MOB' }] }] }] } }]) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "1efe5018-dea2-4370-8b5e-d87e90df8dbf",
+      "name": "amoCRM: Create Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        32,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Парсим ответ amoCRM\nconst lead = $('Check Duplicate').item.json;\nconst resp = $json;\n\nlet leadId = null;\nlet status = 'created';\nlet error = null;\n\ntry {\n  // Успешный ответ amoCRM /leads/complex\n  if (Array.isArray(resp) && resp[0]?.id) {\n    leadId = resp[0].id;\n  } else if (resp._embedded?.leads?.[0]?.id) {\n    leadId = resp._embedded.leads[0].id;\n  } else if (resp.id) {\n    leadId = resp.id;\n  } else {\n    status = 'amo_failed';\n    error = 'amoCRM не вернул ID лида: ' + JSON.stringify(resp).substring(0, 300);\n  }\n} catch (e) {\n  status = 'amo_failed';\n  error = e.message;\n}\n\nreturn {\n  json: {\n    ...lead,\n    amo_lead_id: leadId,\n    amo_status: status,\n    amo_error: error,\n    amo_response: resp\n  }\n};"
+      },
+      "id": "0accad0b-f288-4c66-b1ed-674d33ebb701",
+      "name": "Parse amoCRM Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        288,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "<AUTHENTICATION>",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('⚙️ Config').item.json.gsheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('⚙️ Config').item.json.gsheet_log_name }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $json.received_at }}",
+            "source": "={{ $json.source }}",
+            "name": "={{ $json.name }}",
+            "phone": "={{ $json.phone }}",
+            "comment": "={{ $json.comment }}",
+            "status": "={{ $json.amo_status }}",
+            "amo_lead_id": "={{ $json.amo_lead_id || '' }}",
+            "error": "={{ $json.amo_error || '' }}",
+            "username": "={{ $json.username }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "a508ccc1-e44d-4304-a702-ddf16f799b98",
+      "name": "Log New Lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        544,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('⚙️ Config').item.json.tg_chat_id }}",
+        "text": "={{ ($json.amo_status === 'created' ? '✅ <b>Новая заявка</b>' : '⚠️ <b>Заявка получена, НО amoCRM упал!</b>') }}\n\n👤 {{ $json.name }}\n📞 {{ $json.phone }}\n🔗 Источник: {{ $json.source }}\n💬 {{ $json.comment || '—' }}\n{{ $json.username ? '🆔 ' + $json.username : '' }}\n\n{{ $json.amo_lead_id ? '🆔 amoCRM Lead: <code>' + $json.amo_lead_id + '</code>' : '❌ amoCRM error: ' + ($json.amo_error || 'unknown') }}",
+        "additionalFields": {
+          "<AIRTABLE_BASE_ID>": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "e5bc17bd-39f5-4d62-8ebe-886f19f3562d",
+      "name": "TG: Notify New Lead",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        784,
+        432
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: $('Parse amoCRM Response').item.json.amo_status === 'created', amo_lead_id: $('Parse amoCRM Response').item.json.amo_lead_id, status: $('Parse amoCRM Response').item.json.amo_status }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "da829f01-73da-4025-9e13-618fb2825f64",
+      "name": "Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1040,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, error: 'invalid_phone', message: 'Телефон не указан или некорректен' }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "7ec8b1c4-a3e3-455a-8634-efdfbe8ef90b",
+      "name": "Respond 400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -720,
+        432
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook: Lead Intake": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Config": {
+      "main": [
+        [
+          {
+            "node": "Normalize Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Lead": {
+      "main": [
+        [
+          {
+            "node": "Valid Phone?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid Phone?": {
+      "main": [
+        [
+          {
+            "node": "Search Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Check Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Is Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Duplicate?": {
+      "main": [
+        [
+          {
+            "node": "Log Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "amoCRM: Create Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Duplicate": {
+      "main": [
+        [
+          {
+            "node": "TG: Notify Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG: Notify Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Respond 409",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "amoCRM: Create Lead": {
+      "main": [
+        [
+          {
+            "node": "Parse amoCRM Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse amoCRM Response": {
+      "main": [
+        [
+          {
+            "node": "Log New Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log New Lead": {
+      "main": [
+        [
+          {
+            "node": "TG: Notify New Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG: Notify New Lead": {
+      "main": [
+        [
+          {
+            "node": "Respond 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

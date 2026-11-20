@@ -1,0 +1,514 @@
+{
+  "name": "Avito Lead Bot — AI Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "avito-incoming",
+        "options": {}
+      },
+      "id": "27cea751-1eb4-4268-b508-6684b3b444f8",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -896,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "lookup",
+        "sheetId": "<SHEETID>",
+        "range": "History",
+        "lookupColumn": "chat_id",
+        "lookupValue": "={{$json[\"chat_id\"]}}",
+        "options": {}
+      },
+      "id": "30a2d363-8bd2-4b2a-98bf-5b902008a427",
+      "name": "Получить историю",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 2,
+      "position": [
+        -496,
+        1040
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "functionCode": "const parsed = $node['Парсинг'].json;\nconst sheets = items[0].json;\n\n// Собираем предыдущую историю\nconst prevHistory = sheets.history || '';\n\n// Добавляем новое сообщение клиента\nconst updatedHistory = prevHistory \n  ? prevHistory + '\\nКлиент: ' + parsed.text\n  : 'Клиент: ' + parsed.text;\n\nreturn [{\n  json: {\n    chat_id: parsed.chat_id,\n    user_id: parsed.user_id,\n    userName: parsed.userName,\n    text: parsed.text,\n    history: updatedHistory,\n    messageCount: (sheets.messageCount ? parseInt(sheets.messageCount) : 0) + 1\n  }\n}];"
+      },
+      "id": "5f694e92-56c6-4653-8459-6b28ff924337",
+      "name": "Собрать контекст",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -288,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const prev = $node['Собрать контекст'].json;\nconst raw = items[0].json.output || items[0].json.text || '';\n\nlet ai;\ntry {\n  const clean = raw.replace(/```json\\n?/g, '').replace(/```/g, '').trim();\n  ai = JSON.parse(clean);\n} catch(e) {\n  ai = { reply: raw, zadacha: '', budget: '', srok: '', status: 'collecting' };\n}\n\nconst updatedHistory = prev.history + '\\nБот: ' + ai.reply;\n\nreturn [{\n  json: {\n    chat_id:  prev.chat_id,\n    user_id:  prev.user_id,\n    userName: prev.userName,\n    reply:    ai.reply,\n    zadacha:  ai.zadacha || '',\n    budget:   ai.budget || '',\n    srok:     ai.srok || '',\n    status:   ai.status || 'collecting',\n    history:  updatedHistory,\n    messageCount: prev.messageCount\n  }\n}];"
+      },
+      "id": "2bca4de4-b0e9-4896-bf06-0eb04690bf79",
+      "name": "Парсим ответ AI",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        176,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.avito.ru/token",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            },
+            {
+              "name": "client_id",
+              "value": "<CLIENT_ID>"
+            },
+            {
+              "name": "client_secret",
+              "value": "<CLIENT_SECRET>"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "58d3d180-5282-4bc1-b540-82d6053a87fe",
+      "name": "Avito токен",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        368,
+        912
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.avito.ru/messenger/v1/accounts/<AVITO_ACCOUNT_ID>/chats/{{$node['Парсим ответ AI'].json[\"chat_id\"]}}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$node['Avito токен'].json[\"access_token\"]}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"message\": {\n    \"text\": \"{{$node['Парсим ответ AI'].json[\"reply\"]}}\"\n  },\n  \"type\": \"text\"\n}",
+        "options": {}
+      },
+      "id": "cbe77cef-9ff7-4e8e-82e2-fe40f81126ef",
+      "name": "Отправить в Avito",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        608,
+        912
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$node['Парсим ответ AI'].json[\"status\"]}}",
+              "operation": "notEqual",
+              "value2": "collecting"
+            }
+          ]
+        }
+      },
+      "id": "bc6e27c2-4103-462e-bdc4-8decce132848",
+      "name": "Лид квалифицирован?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1008,
+        1056
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "<CHAT_ID>",
+        "text": "=🔔 Новый квалифицированный лид!\n\nСтатус: {{$node['Парсим ответ AI'].json[\"status\"]}}\n👤 {{$node['Парсим ответ AI'].json[\"userName\"]}}\n💬 Задача: {{$node['Парсим ответ AI'].json[\"zadacha\"]}}\n💰 Бюджет: {{$node['Парсим ответ AI'].json[\"budget\"]}}\n⏱ Срок: {{$node['Парсим ответ AI'].json[\"srok\"]}}",
+        "additionalFields": {}
+      },
+      "id": "95193da2-a786-4f19-b643-85d72aad920a",
+      "name": "TG уведомление",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1264,
+        928
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "noData",
+        "options": {}
+      },
+      "id": "00f17b37-1208-406b-a49b-8d1d974a47b5",
+      "name": "Respond OK1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -928,
+        1536
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{$json[\"history\"]}}",
+        "options": {
+          "systemMessage": "ВАЖНО: отвечай ОДНИМ сообщением. Никогда не отправляй несколько сообщений подряд.\n\nТы — ассистент фрилансера по ИИ-автоматизации. Ведёшь диалог с клиентом в мессенджере Авито. Выясняешь потребности и квалифицируешь лида.\n\nУзнай:\n1. Какую задачу хочет решить клиент\n2. Какой бюджет\n3. Когда нужно запустить\n\nПравила:\n- Пиши коротко, дружелюбно (1-3 предложения)\n- По одному вопросу за сообщение\n- Первый раз — поздоровайся и спроси про задачу\n\nОтвечай СТРОГО JSON без лишнего текста:\n{\"reply\":\"текст клиенту\",\"zadacha\":\"задача или пусто\",\"budget\":\"бюджет или пусто\",\"srok\":\"срок или пусто\",\"status\":\"collecting|горячий|тёплый|нецелевой\"}\n\nstatus=collecting пока собираешь данные.\nгорячий — задача + бюджет от 20к + срок до месяца.\nтёплый — есть задача, бюджет/срок размытый.\nнецелевой — нет задачи или бюджет менее 5к."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -112,
+        1040
+      ],
+      "id": "91e8001d-9570-416a-abbe-526ccdc6a40f",
+      "name": "AI Agent1"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{$json[\"chat_id\"]}}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        -16,
+        1248
+      ],
+      "id": "e61e43d0-dbc0-4441-8d44-d7a80f8bc0c4",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -112,
+        1248
+      ],
+      "id": "7d04de4c-cc9f-4a84-aa0f-1f8e6060eed0",
+      "name": "OpenAI Chat Model"
+    },
+    {
+      "parameters": {
+        "functionCode": "const body = items[0].json.body || items[0].json;\nconst payload = body.payload || body;\nconst value = payload.value || payload;\n\nconst chat_id = String(value.chat_id || body.chat_id || '');\nconst user_id = String(value.user_id || body.user_id || '');\nconst author_id = String(value.author_id || body.author_id || '');\nconst content = value.content || {};\nconst text = content.text || value.text || '';\nconst userName = value.author_name || body.author_name || 'Клиент';\n\n// ФИЛЬТР: пропускаем свои сообщения\nif (author_id === user_id) {\n  return [];  // пустой массив = нода ничего не передаёт дальше\n}\n\nif (!chat_id || !text) {\n  return [];\n}\n\nreturn [{ json: { chat_id, user_id, author_id, text, userName } }];"
+      },
+      "id": "cab2836e-ddcb-4887-b802-5b81d73dcf41",
+      "name": "Парсинг",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -688,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "<DOCUMENTID>",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 931896111,
+          "mode": "list",
+          "cachedResultName": "History"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "chat_id": "={{ $json.chat_id }}",
+            "user_id": "={{ $json.user_id }}",
+            "userName": "={{ $json.userName }}",
+            "reply": "={{ $json.reply }}",
+            "zadacha": "={{ $json.zadacha }}",
+            "budget": "={{ $json.budget }}",
+            "srok": "={{ $json.srok }}",
+            "status": "={{ $json.status }}",
+            "history": "={{ $json.history }}",
+            "messageCount": "={{ $json.messageCount }}"
+          },
+          "matchingColumns": [
+            "chat_id"
+          ],
+          "schema": [
+            {
+              "id": "chat_id",
+              "displayName": "chat_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "userName",
+              "displayName": "userName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reply",
+              "displayName": "reply",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "zadacha",
+              "displayName": "zadacha",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "budget",
+              "displayName": "budget",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "srok",
+              "displayName": "srok",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "history",
+              "displayName": "history",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "messageCount",
+              "displayName": "messageCount",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        672,
+        1072
+      ],
+      "id": "3cc706a8-5963-4169-aeee-ca9e4a67851f",
+      "name": "Append or update row in sheet"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Парсинг",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получить историю": {
+      "main": [
+        [
+          {
+            "node": "Собрать контекст",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Собрать контекст": {
+      "main": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Парсим ответ AI": {
+      "main": [
+        [
+          {
+            "node": "Avito токен",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Append or update row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avito токен": {
+      "main": [
+        [
+          {
+            "node": "Отправить в Avito",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Отправить в Avito": {
+      "main": [
+        []
+      ]
+    },
+    "Лид квалифицирован?": {
+      "main": [
+        [
+          {
+            "node": "TG уведомление",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent1": {
+      "main": [
+        [
+          {
+            "node": "Парсим ответ AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Парсинг": {
+      "main": [
+        [
+          {
+            "node": "Получить историю",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append or update row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Лид квалифицирован?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

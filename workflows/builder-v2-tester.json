@@ -1,0 +1,954 @@
+{
+  "name": "Tester",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "workflowJson",
+              "type": "object"
+            },
+            {
+              "name": "businessTask"
+            },
+            {
+              "name": "templateName"
+            },
+            {
+              "name": "templateUrl"
+            }
+          ]
+        }
+      },
+      "id": "549bb4f4-b499-450b-894d-89507dbdccbf",
+      "name": "Execute Sub-workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -736,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://your-instance.app.n8n.cloud/api/v1/workflows",
+        "authentication": "<AUTHENTICATION>",
+        "genericAuthType": "<GENERICAUTHTYPE>",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.workflow) }}",
+        "options": {}
+      },
+      "id": "c55df0cd-0c4b-4898-9a3b-50bbd263daa7",
+      "name": "Создать воркфлоу",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        544,
+        -96
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://your-instance.app.n8n.cloud/api/v1/workflows/{{ $json.id }}/activate",
+        "authentication": "<AUTHENTICATION>",
+        "genericAuthType": "<GENERICAUTHTYPE>",
+        "options": {}
+      },
+      "id": "6a7a4e9f-d9a1-4b3f-87f2-b35894754509",
+      "name": "Активировать воркфлоу",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        880,
+        -96
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst apiTestDone = data.apiTestDone === true;\nconst runTestDone = data.runTestDone === true;\nlet structuralScore = data.structuralScore || 0;\nlet structuralChecks = data.structuralChecks || data.checks || [];\nlet structuralIssues = data.structuralIssues || data.issues || [];\nlet apiScore = data.apiScore || 0;\nlet apiChecks = data.apiChecks || [];\nlet apiIssues = data.apiIssues || [];\nlet runScore = data.runScore || 0;\nlet runChecks = data.runChecks || [];\nlet runIssues = data.runIssues || [];\nlet templateName = data.templateName || 'Unknown';\nlet templateUrl = data.templateUrl || '';\nlet businessTask = data.businessTask || '';\nlet triggerType = data.triggerType || 'unknown';\n\n// Пробрасываем workflowJson если он был передан на вход ← НОВАЯ СТРОКА\nlet workflowJson = data.workflowJson || $('Структурный анализ').first().json.workflowJson || null;\n\n// === Итоговый score ===\nlet totalScore;\nlet testType;\nif (runTestDone && apiTestDone) {\n  // Все три уровня: структура 40% + API 35% + запуск 25%\n  totalScore = Math.round(\n    (structuralScore / 100) * 40 +\n    (apiScore / 50) * 35 +\n    (runScore / 30) * 25\n  );\n  testType = 'Полный тест: структура + API + запуск';\n} else if (apiTestDone) {\n  // Два уровня: структура 50% + API 50%\n  totalScore = Math.round(\n    (structuralScore / 100) * 50 +\n    (apiScore / 50) * 50\n  );\n  testType = 'Структурный анализ + API-валидация';\n} else {\n  // Только структурный\n  totalScore = structuralScore;\n  testType = 'Только структурный анализ';\n}\nconst passed = totalScore >= 60;\n\n// === Все проверки вместе ===\nconst allChecks = [...structuralChecks];\nif (apiChecks.length > 0) {\n  allChecks.push('--- API-валидация ---');\n  allChecks.push(...apiChecks);\n}\nif (runChecks.length > 0) {\n  allChecks.push('--- Запуск ---');\n  allChecks.push(...runChecks);\n}\nconst allIssues = [...structuralIssues, ...apiIssues, ...runIssues];\n\n// === Итоговое summary ===\nlet summary = '';\nif (passed && runTestDone && runScore >= 20) {\n  summary = 'Воркфлоу прошёл полную проверку: структура валидна, n8n принял, запуск успешен';\n} else if (passed && runTestDone && runScore < 20) {\n  summary = 'Структура и активация ОК, но запуск не вернул данные — возможны проблемы в логике';\n} else if (passed && apiTestDone && apiScore >= 40) {\n  summary = 'Воркфлоу прошёл проверку: структура валидна, n8n принял и активировал';\n} else if (passed && apiTestDone) {\n  summary = 'Структура хорошая, но n8n не смог активировать — возможны проблемы при запуске';\n} else if (passed && !apiTestDone) {\n  summary = 'Структура корректна, но полный тест невозможен (community ноды / Error Trigger)';\n} else {\n  summary = 'Воркфлоу не прошёл проверку: ' + (allIssues[0] || 'низкий score');\n}\n\nreturn [{\n  json: {\n    passed,\n    score: totalScore,\n    testType,\n    summary,\n    checks: allChecks,\n    issues: allIssues,\n    templateName,\n    templateUrl,\n    businessTask,\n    triggerType,\n    workflowJson  // ← НОВАЯ СТРОКА\n  }\n}];"
+      },
+      "id": "38209e5a-ca99-4bb6-a16e-7607745ff919",
+      "name": "Финальный отчёт",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4192,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://your-instance.app.n8n.cloud/api/v1/workflows/{{ $json.workflowId }}/deactivate",
+        "authentication": "<AUTHENTICATION>",
+        "genericAuthType": "<GENERICAUTHTYPE>",
+        "options": {}
+      },
+      "id": "de624d0e-9ccc-4436-8d17-89c7a653542d",
+      "name": "Деактивировать воркфлоу",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        3344,
+        -320
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=https://your-instance.app.n8n.cloud/api/v1/workflows/{{ $json.id || $json.workflowId }}",
+        "authentication": "<AUTHENTICATION>",
+        "genericAuthType": "<GENERICAUTHTYPE>",
+        "options": {}
+      },
+      "id": "0e4f4539-1c0a-4812-83de-7565a088dd25",
+      "name": "Удалить воркфлоу",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        3712,
+        -288
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst wf = input.workflowJson;\nconst nodes = wf.nodes || [];\nconst connections = wf.connections || {};\n\n// ===== 1. ДЕТЕКЦИЯ ТИПОВ НОД =====\n\nconst communityNodes = nodes.filter(n =>\n  n.type &&\n  !n.type.startsWith('n8n-nodes-base.') &&\n  !n.type.startsWith('@n8n/n8n-nodes-langchain.') &&\n  !n.type.startsWith('@n8n/')\n);\n\nconst triggerNode = nodes.find(n =>\n  n.type && (\n    n.type.toLowerCase().includes('trigger') ||\n    n.type.toLowerCase().includes('webhook')\n  )\n);\n\nconst isErrorTrigger = triggerNode &&\n  triggerNode.type === 'n8n-nodes-base.errorTrigger';\n\nconst stickyNotes = nodes.filter(n =>\n  n.type === 'n8n-nodes-base.stickyNote'\n);\n\nconst workNodes = nodes.filter(n =>\n  n.type !== 'n8n-nodes-base.stickyNote'\n);\n\n// ===== 2. ПРОВЕРКА CONNECTIONS =====\n\nconst connectedNodes = new Set();\nObject.keys(connections).forEach(name => connectedNodes.add(name));\nObject.values(connections).forEach(outputs => {\n  if (outputs.main) {\n    outputs.main.forEach(conns => {\n      if (Array.isArray(conns)) {\n        conns.forEach(c => connectedNodes.add(c.node));\n      }\n    });\n  }\n  ['ai_languageModel', 'ai_memory', 'ai_tool', 'ai_outputParser'].forEach(aiType => {\n    if (outputs[aiType]) {\n      outputs[aiType].forEach(conns => {\n        if (Array.isArray(conns)) {\n          conns.forEach(c => connectedNodes.add(c.node));\n        }\n      });\n    }\n  });\n});\n\nconst orphanNodes = workNodes.filter(n => !connectedNodes.has(n.name));\n\nconst nodeNames = new Set(nodes.map(n => n.name));\nconst brokenConnections = [];\nObject.entries(connections).forEach(([sourceName, outputs]) => {\n  if (!nodeNames.has(sourceName)) {\n    brokenConnections.push(`Источник \"${sourceName}\" не существует`);\n  }\n  Object.values(outputs).forEach(connArray => {\n    if (Array.isArray(connArray)) {\n      connArray.forEach(conns => {\n        if (Array.isArray(conns)) {\n          conns.forEach(c => {\n            if (!nodeNames.has(c.node)) {\n              brokenConnections.push(`Цель \"${c.node}\" не существует`);\n            }\n          });\n        }\n      });\n    }\n  });\n});\n\n// ===== 3. SCORE =====\n\nlet score = 0;\nconst checks = [];\nconst issues = [];\n\nif (triggerNode) {\n  score += 15;\n  checks.push('✅ Триггер: ' + triggerNode.type.split('.').pop());\n} else {\n  issues.push('Нет триггер-ноды');\n  checks.push('❌ Триггер не найден');\n}\n\nif (workNodes.length >= 2) {\n  score += 10;\n  checks.push('✅ Нод: ' + workNodes.length);\n} else {\n  issues.push('Слишком мало нод: ' + workNodes.length);\n  checks.push('❌ Мало нод: ' + workNodes.length);\n}\n\nif (orphanNodes.length === 0) {\n  score += 20;\n  checks.push('✅ Все ноды подключены');\n} else if (orphanNodes.length <= 2) {\n  score += 10;\n  const names = orphanNodes.map(n => n.name).join(', ');\n  issues.push('Неподключённые ноды: ' + names);\n  checks.push('⚠️ Неподключённых нод: ' + orphanNodes.length + ' (' + names + ')');\n} else {\n  issues.push('Много неподключённых нод: ' + orphanNodes.length);\n  checks.push('❌ Неподключённых нод: ' + orphanNodes.length);\n}\n\nif (brokenConnections.length === 0) {\n  score += 15;\n  checks.push('✅ Все connections валидны');\n} else {\n  issues.push('Битые connections: ' + brokenConnections.join('; '));\n  checks.push('❌ Битых connections: ' + brokenConnections.length);\n}\n\nif (communityNodes.length === 0) {\n  score += 10;\n  checks.push('✅ Только встроенные ноды');\n} else {\n  const names = communityNodes.map(n => n.name + ' (' + n.type + ')').join(', ');\n  issues.push('Community ноды: ' + names);\n  checks.push('⚠️ Community нод: ' + communityNodes.length + ' — ' + names);\n}\n\nif (!isErrorTrigger) {\n  score += 5;\n  checks.push('✅ Стандартный триггер');\n} else {\n  checks.push('⚠️ Error Trigger — запуск невозможен');\n  issues.push('Error Trigger: невозможно протестировать запуском');\n}\n\nconst needsAssembly = orphanNodes.length > 2 && stickyNotes.length > 0;\nif (!needsAssembly) {\n  score += 5;\n  checks.push('✅ Воркфлоу собран');\n} else {\n  issues.push('Воркфлоу не собран — есть sticky notes и неподключённые ноды');\n  checks.push('❌ Похоже на \"сборочный набор\" с инструкцией');\n}\n\nif (wf.settings && wf.settings.executionOrder === 'v1') {\n  score += 5;\n  checks.push('✅ executionOrder: v1');\n} else {\n  score += 2;\n  checks.push('⚠️ executionOrder не задан (может работать)');\n}\n\nconst connectionCount = Object.keys(connections).length;\nif (connectionCount >= 1) {\n  score += 10;\n  checks.push('✅ Цепочки подключений: ' + connectionCount);\n} else {\n  issues.push('Нет ни одного подключения между нодами');\n  checks.push('❌ Нет connections');\n}\n\n// ===== 4. МОЖНО ЛИ API-ТЕСТ? =====\n\nconst canApiTest = communityNodes.length === 0 &&\n                   !isErrorTrigger &&\n                   !needsAssembly &&\n                   brokenConnections.length === 0 &&\n                   triggerNode !== undefined;\n\n// ===== 5. ОПРЕДЕЛЯЕМ ВНЕШНИЕ НОДЫ (ИНВЕРТИРОВАННАЯ ЛОГИКА) =====\n// Белый список СЛУЖЕБНЫХ нод — всё остальное считается внешним и мокируется\n\nconst INTERNAL_PATTERNS = [\n  'code', 'function', 'functionItem', 'set', 'if', 'switch',\n  'merge', 'splitOut', 'splitInBatches', 'aggregate', 'limit',\n  'filter', 'sort', 'removeDuplicates', 'summarize', 'compareDatasets',\n  'dateTime', 'crypto', 'xml', 'html', 'markdown', 'convertToFile',\n  'extractFromFile', 'compression', 'renameKeys', 'itemLists',\n  'stickyNote', 'noOp', 'wait', 'respondToWebhook',\n  'executeWorkflow', 'stopAndError', 'editFields',\n  'start', 'manualTrigger', 'webhook', 'scheduleTrigger',\n  'errorTrigger', 'executeWorkflowTrigger', 'chatTrigger',\n  'formTrigger'\n];\n\nfunction isInternalNode(node) {\n  const typeLower = node.type.toLowerCase();\n  if (typeLower.includes('trigger')) return true;\n  if (typeLower.includes('webhook')) return true;\n  // AI sub-ноды не дают output в main — не мокируем\n  if (node.type.startsWith('@n8n/n8n-nodes-langchain.lm')) return true;\n  if (node.type.startsWith('@n8n/n8n-nodes-langchain.memory')) return true;\n  if (node.type.startsWith('@n8n/n8n-nodes-langchain.tool')) return true;\n  if (node.type.startsWith('@n8n/n8n-nodes-langchain.output')) return true;\n  if (node.type.startsWith('@n8n/n8n-nodes-langchain.embedding')) return true;\n  if (node.type.startsWith('@n8n/n8n-nodes-langchain.vector')) return true;\n  // HTTP Request без credentials — публичный API, не мокируем\n  if (typeLower.includes('httprequest')) {\n    return !(node.credentials && Object.keys(node.credentials).length > 0);\n  }\n  return INTERNAL_PATTERNS.some(p => typeLower.includes(p.toLowerCase()));\n}\n\nconst externalNodes = workNodes\n  .filter(n => !isInternalNode(n))\n  .map(n => ({ name: n.name, type: n.type }));\n\nreturn [{\n  json: {\n    workflowJson: wf,\n    businessTask: input.businessTask,\n    templateName: input.templateName,\n    templateUrl: input.templateUrl || '',\n    structuralScore: score,\n    maxStructuralScore: 100,\n    checks,\n    issues,\n    canApiTest,\n    communityNodesCount: communityNodes.length,\n    communityNodesList: communityNodes.map(n => n.type),\n    isErrorTrigger,\n    needsAssembly,\n    orphanCount: orphanNodes.length,\n    totalWorkNodes: workNodes.length,\n    triggerType: triggerNode ? triggerNode.type : 'none',\n    hasStickyNotes: stickyNotes.length > 0,\n    stickyContent: stickyNotes.map(n => n.parameters?.content || '').join('\\n---\\n'),\n    externalNodes,                             // ← НОВОЕ\n    externalNodesCount: externalNodes.length,  // ← НОВОЕ\n  }\n}];"
+      },
+      "id": "c5a75b93-8550-419b-b235-65dab3f55d69",
+      "name": "Структурный анализ",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -336,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "9b625900-a804-49f2-8cee-6385891bf554",
+              "leftValue": "={{ $json.canApiTest }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -80,
+        80
+      ],
+      "id": "9ff165ec-6590-40fe-b6f8-995bfcaf5382",
+      "name": "Можно ли API тест?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst wf = JSON.parse(JSON.stringify(data.workflowJson));\nconst webhookPath = 'test-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6);\n\nfor (let i = 0; i < wf.nodes.length; i++) {\n  const n = wf.nodes[i];\n  if (n.type && (\n    n.type.toLowerCase().includes('trigger') ||\n    n.type.toLowerCase().includes('webhook')\n  )) {\n    wf.nodes[i] = {\n      id: n.id,\n      name: n.name,\n      type: 'n8n-nodes-base.webhook',\n      typeVersion: 2,\n      position: n.position,\n      parameters: {\n        httpMethod: 'POST',\n        path: webhookPath,\n        responseMode: 'lastNode'\n      },\n      webhookId: webhookPath\n    };\n    break;\n  }\n}\n\nwf.nodes.forEach(n => {\n  if (n.credentials) delete n.credentials;\n});\n\nconst cleanWorkflow = {\n  name: '[TEST] ' + (wf.name || 'Workflow') + ' ' + Date.now(),\n  nodes: wf.nodes,\n  connections: wf.connections || {},\n  settings: {\n    executionOrder: (wf.settings && wf.settings.executionOrder) || 'v1'\n  }\n};\n\nreturn [{\n  json: {\n    workflow: cleanWorkflow,\n    webhookPath,\n    structuralScore: data.structuralScore,\n    checks: data.checks,\n    issues: data.issues,\n    templateName: data.templateName,\n    templateUrl: data.templateUrl,\n    businessTask: data.businessTask,\n    triggerType: data.triggerType,\n    externalNodes: data.externalNodes,\n    externalNodesCount: data.externalNodesCount,\n  }\n}];"
+      },
+      "id": "2fb5bdbb-9533-4202-8dbc-ece15448331c",
+      "name": "Подготовка к API-тесту",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "9b625900-a804-49f2-8cee-6385891bf554",
+              "leftValue": "={{ $json.active }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1024,
+        -336
+      ],
+      "id": "961fce5d-4922-4bf5-9bb9-f15913e82c9d",
+      "name": "Активация прошла?"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Сгенерируй мок-данные для тестирования n8n воркфлоу. Верни ТОЛЬКО JSON.\n\nБизнес-задача: {{ $json.businessTask }}\n\nВнешние ноды которым нужны мок-данные:\n{{ JSON.stringify($('Подготовка к API-тесту').first().json.externalNodes) }}\n\nДля каждой ноды верни данные которые она ВЕРНУЛА БЫ при успехе.\n\nФОРМАТ — строго JSON, без markdown, без пояснений:\n{\n  \"mocks\": {\n    \"ТОЧНОЕ имя ноды как в списке выше\": { \"поля\": \"значения\" }\n  }\n}\n\nШаблоны ответов по типам нод:\n- Google Sheets (чтение): { \"row_number\": 2, \"name\": \"John Doe\", \"email\": \"john@example.com\", \"status\": \"active\" }\n- Google Sheets (запись): { \"updatedRows\": 1, \"spreadsheetId\": \"abc123\" }\n- Slack (отправка): { \"ok\": true, \"channel\": \"C024BE91L\", \"ts\": \"1405894322.002768\" }\n- Telegram (отправка): { \"ok\": true, \"result\": { \"message_id\": 456, \"chat\": { \"id\": 123 } } }\n- Gmail (отправка): { \"id\": \"msg-abc123\", \"threadId\": \"thread-1\", \"labelIds\": [\"SENT\"] }\n- Gmail (чтение): { \"id\": \"msg-xyz\", \"snippet\": \"Hello, this is a test email\", \"from\": \"user@example.com\" }\n- OpenAI / LLM: { \"text\": \"Вот пример ответа AI на задачу пользователя\" }\n- Airtable: { \"id\": \"rec123\", \"fields\": { \"Name\": \"Test\", \"Status\": \"Done\" } }\n- Notion: { \"id\": \"page-123\", \"url\": \"https://notion.so/page-123\" }\n- HubSpot: { \"id\": \"501\", \"properties\": { \"email\": \"test@example.com\" } }\n- Discord: { \"id\": \"msg-123\", \"content\": \"Test message sent\" }\n- Jira: { \"id\": \"10001\", \"key\": \"TEST-1\" }\n- Google Drive: { \"id\": \"file-abc\", \"name\": \"document.pdf\", \"webViewLink\": \"https://drive.google.com/file/d/abc\" }\n- Stripe: { \"id\": \"ch_abc123\", \"amount\": 1000, \"status\": \"succeeded\" }\n- Twilio: { \"sid\": \"SM123\", \"status\": \"sent\" }\n- PostgreSQL / MySQL / MongoDB: { \"rows\": [{ \"id\": 1, \"name\": \"Test\", \"status\": \"active\" }] }\n- Redis: { \"value\": \"mock-value\", \"key\": \"test-key\" }\n- AWS S3: { \"Location\": \"https://s3.amazonaws.com/bucket/file.pdf\", \"Key\": \"file.pdf\" }\n- Shopify: { \"id\": 1234567, \"email\": \"user@example.com\", \"total_price\": \"99.00\" }\n- любой другой тип: { \"success\": true, \"data\": \"mock\", \"_originalType\": \"unknown\" }\n\nВажно:\n- Имена нод должны ТОЧНО совпадать с именами из списка выше — буква в букву\n- Каждый мок это один объект (не массив)\n- Если тип ноды незнакомый — верни { \"success\": true, \"data\": \"mock\" }\n- НЕ мокируй триггеры, Code, Set, IF, Switch, Merge, NoOp, Wait, Filter\n\nВерни ТОЛЬКО JSON. Без ```json. Без пояснений.",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.8,
+      "position": [
+        1296,
+        -592
+      ],
+      "id": "050bbf09-1b29-4c59-8bd9-aa3737623f77",
+      "name": "LLM генерирует моки"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5-nano",
+          "mode": "list",
+          "cachedResultName": "gpt-5-nano"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1296,
+        -416
+      ],
+      "id": "e47a613c-964f-4e96-bc4b-41616283cddb",
+      "name": "OpenAI Chat Model1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === 1. Получаем данные ===\nconst apiPrepData = $('Подготовка к API-тесту').first().json;\nconst createResult = $('Создать воркфлоу').first().json;\nconst wf = JSON.parse(JSON.stringify(apiPrepData.workflow)); // deep clone\n\n// === 2. Парсим ответ LLM ===\nconst raw = $input.first().json.text || $input.first().json.output || '';\nlet mocks = {};\nlet mockParseError = null;\n\ntry {\n  let clean = raw.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  const parsed = JSON.parse(clean);\n  // LLM может вернуть { \"mocks\": {...} } или сразу { \"НодаA\": {...}, \"НодаB\": {...} }\n  if (parsed.mocks && typeof parsed.mocks === 'object') {\n    mocks = parsed.mocks;\n  } else {\n    const values = Object.values(parsed);\n    if (values.length > 0 && typeof values[0] === 'object') {\n      mocks = parsed;\n    }\n  }\n} catch (e) {\n  mockParseError = e.message;\n  mocks = {};\n}\n\n// === 3. Логика мокирования (инвертированная) ===\nconst INTERNAL_PATTERNS = [\n  'code', 'function', 'functionItem', 'set', 'if', 'switch',\n  'merge', 'splitOut', 'splitInBatches', 'aggregate', 'limit',\n  'filter', 'sort', 'removeDuplicates', 'summarize', 'compareDatasets',\n  'dateTime', 'crypto', 'xml', 'html', 'markdown', 'convertToFile',\n  'extractFromFile', 'compression', 'renameKeys', 'itemLists',\n  'stickyNote', 'noOp', 'wait', 'respondToWebhook',\n  'executeWorkflow', 'stopAndError', 'editFields',\n  'start', 'manualTrigger', 'webhook', 'scheduleTrigger',\n  'errorTrigger', 'executeWorkflowTrigger', 'chatTrigger',\n  'formTrigger'\n];\n\nfunction shouldMock(node) {\n  const typeLower = node.type.toLowerCase();\n  // Триггеры и webhook уже заменены — не трогаем\n  if (typeLower.includes('trigger')) return false;\n  if (typeLower.includes('webhook')) return false;\n  // AI sub-ноды не имеют main output — не мокируем\n  if (node.type.startsWith('@n8n/n8n-nodes-langchain.lm')) return false;\n  if (node.type.startsWith('@n8n/n8n-nodes-langchain.memory')) return false;\n  if (node.type.startsWith('@n8n/n8n-nodes-langchain.tool')) return false;\n  if (node.type.startsWith('@n8n/n8n-nodes-langchain.output')) return false;\n  if (node.type.startsWith('@n8n/n8n-nodes-langchain.embedding')) return false;\n  if (node.type.startsWith('@n8n/n8n-nodes-langchain.vector')) return false;\n  // HTTP Request: мокируем только если есть credentials\n  // Без credentials — вероятно публичный API, пусть выполняется реально\n  if (typeLower.includes('httprequest')) {\n    return node.credentials && Object.keys(node.credentials).length > 0;\n  }\n  // Служебные ноды — не мокируем\n  if (INTERNAL_PATTERNS.some(p => typeLower.includes(p.toLowerCase()))) return false;\n  // Всё остальное — мокируем\n  return true;\n}\n\n// === 4. Заменяем внешние ноды на Code-заглушки ===\nconst replacedNodes = [];\n\nfor (let i = 0; i < wf.nodes.length; i++) {\n  const n = wf.nodes[i];\n  if (shouldMock(n)) {\n    const mockData = mocks[n.name] || {\n      _mock: true,\n      _originalType: n.type,\n      success: true,\n      data: 'mock'\n    };\n    // Имя ноды СОХРАНЯЕМ — connections привязаны к имени!\n    wf.nodes[i] = {\n      id: n.id,\n      name: n.name,\n      type: 'n8n-nodes-base.code',\n      typeVersion: 2,\n      position: n.position,\n      parameters: {\n        jsCode: 'return [{ json: ' + JSON.stringify(mockData) + ' }];'\n      }\n    };\n    replacedNodes.push(n.name + ' (' + n.type.split('.').pop() + ')');\n  }\n}\n\n// === 5. Зачищаем credentials ===\nwf.nodes.forEach(n => {\n  if (n.credentials) delete n.credentials;\n});\n\nreturn [{\n  json: {\n    workflow: wf,\n    workflowId: createResult.id,\n    webhookPath: apiPrepData.webhookPath,\n    replacedNodes,\n    mockCount: Object.keys(mocks).length,\n    mockParseError,\n    hasMocks: Object.keys(mocks).length > 0\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1776,
+        -592
+      ],
+      "id": "edd0652d-4978-48ab-9538-28d676b4bbcd",
+      "name": "Парсинг и подготовка к запуску"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://your-instance.app.n8n.cloud/api/v1/workflows/{{ $json.workflowId }}",
+        "authentication": "<AUTHENTICATION>",
+        "genericAuthType": "<GENERICAUTHTYPE>",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.workflow) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2112,
+        -592
+      ],
+      "id": "5e96d9a2-2749-47ab-8906-cfbc4772276a",
+      "name": "Обновить воркфлоу",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2416,
+        -592
+      ],
+      "id": "e0d40803-ae50-4fe2-854b-bfa2f7cd90c3",
+      "name": "Wait"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://your-instance.app.n8n.cloud/webhook/{{ $('Парсинг и подготовка к запуску').first().json.webhookPath }}",
+        "authentication": "<AUTHENTICATION>",
+        "genericAuthType": "<GENERICAUTHTYPE>",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"test\": true, \"source\": \"tester\", \"timestamp\": \"{{ $now.toISO() }}\" }",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2752,
+        -592
+      ],
+      "id": "c043bd8e-bca1-4334-b4c7-85d22a88b8e0",
+      "name": "Запустить webhook",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const webhookResponse = $input.first().json;\nconst prepData = $('Парсинг и подготовка к запуску').first().json;\nconst apiPrepData = $('Подготовка к API-тесту').first().json;\n\nlet runScore = 0;\nconst runChecks = [];\nconst runIssues = [];\n\n// Определяем: воркфлоу упал или нет\nconst isError = webhookResponse.error ||\n                (webhookResponse.message && (\n                  webhookResponse.message.toLowerCase().includes('error') ||\n                  webhookResponse.message.toLowerCase().includes('not found') ||\n                  webhookResponse.message.toLowerCase().includes('не найден')\n                )) ||\n                webhookResponse.code === 404 ||\n                webhookResponse.statusCode === 404;\n\nconst hasData = webhookResponse &&\n                typeof webhookResponse === 'object' &&\n                Object.keys(webhookResponse).length > 0;\n\nif (!isError && hasData) {\n  const responseKeys = Object.keys(webhookResponse);\n  runScore = 25;\n  runChecks.push('✅ Запуск: воркфлоу отработал и вернул данные');\n  // Бонус за содержательный ответ\n  const hasRealData = responseKeys.some(k =>\n    webhookResponse[k] !== null &&\n    webhookResponse[k] !== undefined &&\n    webhookResponse[k] !== '' &&\n    k !== 'statusCode'\n  );\n  if (hasRealData) {\n    runScore = 30;\n    runChecks.push('✅ Ответ содержит данные: ' + responseKeys.slice(0, 5).join(', '));\n  }\n} else {\n  const errMsg = webhookResponse?.message ||\n                 webhookResponse?.error ||\n                 JSON.stringify(webhookResponse).substring(0, 100);\n  runIssues.push('Запуск не удался: ' + errMsg);\n  runChecks.push('❌ Запуск: воркфлоу не вернул данные');\n  runChecks.push('   Ответ: ' + String(errMsg).substring(0, 80));\n}\n\n// Инфо о замокированных нодах\nif (prepData.replacedNodes && prepData.replacedNodes.length > 0) {\n  runChecks.push('ℹ️ Замокировано нод: ' + prepData.replacedNodes.length);\n  prepData.replacedNodes.forEach(n => runChecks.push('   🔸 ' + n));\n}\n\nif (prepData.mockParseError) {\n  runChecks.push('⚠️ Ошибка парсинга моков LLM: ' + prepData.mockParseError);\n  runChecks.push('   Использованы дефолтные заглушки');\n}\n\nreturn [{\n  json: {\n    runScore,\n    runChecks,\n    runIssues,\n    runTestDone: true,\n    structuralScore: apiPrepData.structuralScore,\n    structuralChecks: apiPrepData.checks,\n    structuralIssues: apiPrepData.issues,\n    templateName: apiPrepData.templateName,\n    templateUrl: apiPrepData.templateUrl,\n    businessTask: apiPrepData.businessTask,\n    triggerType: apiPrepData.triggerType,\n    workflowId: prepData.workflowId,\n    apiTestDone: true\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3072,
+        -592
+      ],
+      "id": "bc731cba-edbf-4988-b59b-dd482bdf8cd9",
+      "name": "Оценка запуска"
+    },
+    {
+      "parameters": {
+        "jsCode": "const activateResult = $input.first().json;\nconst apiPrepData = $('Подготовка к API-тесту').first().json;\nconst createResult = $('Создать воркфлоу').first().json;\n\nconst apiChecks = [];\nconst apiIssues = [];\nlet apiScore = 0;\n\n// Создание прошло?\nif (createResult.id) {\n  apiScore += 20;\n  apiChecks.push('✅ API: воркфлоу создан (id: ' + createResult.id + ')');\n} else {\n  const err = createResult.message || JSON.stringify(createResult).substring(0, 100);\n  apiIssues.push('API не принял воркфлоу: ' + err);\n  apiChecks.push('❌ API: ошибка создания — ' + err);\n}\n\n// Активация не прошла\nconst errMsg = activateResult.message ||\n               activateResult.error ||\n               JSON.stringify(activateResult).substring(0, 150);\napiIssues.push('Активация не прошла: ' + errMsg);\napiChecks.push('❌ API: ошибка активации — ' + errMsg);\napiScore += 5; // Частичный балл — создался, но не активировался\n\nreturn [{\n  json: {\n    runScore: 0,\n    runChecks: [],\n    runIssues: [],\n    runTestDone: false,\n    apiScore,\n    apiChecks,\n    apiIssues,\n    structuralScore: apiPrepData.structuralScore,\n    structuralChecks: apiPrepData.checks,\n    structuralIssues: apiPrepData.issues,\n    templateName: apiPrepData.templateName,\n    templateUrl: apiPrepData.templateUrl,\n    businessTask: apiPrepData.businessTask,\n    triggerType: apiPrepData.triggerType,\n    workflowId: createResult.id,\n    apiTestDone: true\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        -48
+      ],
+      "id": "ba584811-037b-45b7-b129-7adcf05c08f9",
+      "name": "Оценка без запуска"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Берём данные из той ноды оценки, которая реально отработала\nlet evalData;\n\ntry {\n  evalData = $('Оценка запуска').first().json;\n} catch(e) {\n  try {\n    evalData = $('Оценка без запуска').first().json;\n  } catch(e2) {\n    evalData = $input.first().json;\n  }\n}\n\n// API score:\n// Если запуск был (Level 3) — значит создание + активация точно прошли → 50 баллов\n// Если не было — берём из \"Оценка без запуска\"\nlet apiScore = 0;\nlet apiChecks = [];\nlet apiIssues = [];\n\nif (evalData.runTestDone) {\n  apiScore = 50; // 20 создание + 30 активация\n  apiChecks = [\n    '✅ API: воркфлоу создан',\n    '✅ API: воркфлоу активирован — все ноды валидны'\n  ];\n} else if (evalData.apiScore !== undefined) {\n  apiScore = evalData.apiScore;\n  apiChecks = evalData.apiChecks || [];\n  apiIssues = evalData.apiIssues || [];\n}\n\nreturn [{\n  json: {\n    structuralScore: evalData.structuralScore || 0,\n    structuralChecks: evalData.structuralChecks || [],\n    structuralIssues: evalData.structuralIssues || [],\n    apiScore,\n    apiChecks,\n    apiIssues,\n    runScore: evalData.runScore || 0,\n    runChecks: evalData.runChecks || [],\n    runIssues: evalData.runIssues || [],\n    runTestDone: evalData.runTestDone || false,\n    apiTestDone: true,\n    templateName: evalData.templateName || 'Unknown',\n    templateUrl: evalData.templateUrl || '',\n    businessTask: evalData.businessTask || '',\n    triggerType: evalData.triggerType || 'unknown'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4016,
+        -288
+      ],
+      "id": "7a89ad77-6f35-4465-b76d-76bd9b674a61",
+      "name": "Сборка результатов"
+    },
+    {
+      "parameters": {
+        "content": "Level 1: Структурный анализ (40% итогового score)\nЧто проверяет:\n\nЕсть ли триггер\nПодключены ли все ноды\nНет ли битых connections\nЕсть ли community ноды\nСобран ли воркфлоу (не инструкция на стикерах)\n\nПочему так:\n\nЭто самая дешевая проверка — просто парсинг JSON без запуска\nОтсекает 80% мусора — шаблоны-заготовки, незаконченные драфты\nРаботает всегда — даже для воркфлоу с community нодами или Error Trigger\n\nПочему не иначе:\n\nБез структурного фильтра придётся создавать в n8n API каждый мусорный воркфлоу → перегрузка инстанса\nAPI не примет битый JSON → узнаем об ошибке только при создании (дорого)",
+        "height": 560,
+        "width": 512,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1168,
+        -1184
+      ],
+      "id": "3e57cdd7-0267-4582-b523-ed288affdd9b",
+      "name": "Sticky Note10"
+    },
+    {
+      "parameters": {
+        "content": "Level 2: API-валидация (35% итогового score)\nЧто проверяет:\n\nСоздание → n8n принял JSON, присвоил ID (20 баллов)\nАктивация → все ноды валидны, нет проблем с credentials (30 баллов)\n\nПочему так:\n\nЕсли воркфлоу создался — значит структура JSON корректная\nЕсли активировался — значит все ноды существуют в n8n, параметры валидны\nЭто проверяет то, что структурный анализ не видит: deprecated ноды, неправильные typeVersion, некорректные parameters\n\nПочему не иначе:\n\nМожно было бы сразу запускать — но воркфлоу без внешних credentials всё равно упадёт\nAPI-валидация дешевле запуска (нет выполнения кода, нет вызовов API)\nАктивация = готовность к production, это важный критерий качества шаблона",
+        "height": 560,
+        "width": 528,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -624,
+        -1184
+      ],
+      "id": "6f65f43f-0eaa-45b9-9d2c-c416dff3ee14",
+      "name": "Sticky Note11"
+    },
+    {
+      "parameters": {
+        "content": "Level 3: Запуск с моками (25% итогового score)\nЧто проверяет:\n\nТриггер корректно запускается\nЛогика воркфлоу работает (данные идут по цепочке)\nПоследняя нода возвращает результат (не падает на ошибке)\n\nПочему с моками, а не реально:\n\nНет credentials → внешние API недоступны\nМокирование симулирует успех всех внешних вызовов\nПроверяем логику обработки данных (IF, Code, Set, Merge), а не интеграции\n\nПочему инвертированная логика (мокируем всё кроме белого списка):\n\nВ n8n 500+ нод, добавляются каждый релиз\nСлужебных нод (Code, IF, Set) — всего 30-40, стабильны\nЛюбая незнакомая нода автоматически получает мок → будущее защищено\n\nПочему responseMode: lastNode а не onReceived:\n\nonReceived → webhook сразу отвечает \"запустился\" → не видим реальный output\nlastNode → webhook ждёт выполнения → получаем финальные данные → можем оценить корректность\n\nПочему HTTP Request не мокируется если нет credentials:\n\nПубличные API (погода, курсы валют) работают без API key\nЕсли их замокировать — потеряем проверку реальных HTTP-вызовов\nС credentials → скорее всего приватный API → мокируем",
+        "height": 560,
+        "width": 464,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -64,
+        -1184
+      ],
+      "id": "69c335d1-80d7-4347-b0d1-72a7d8c03752",
+      "name": "Sticky Note12"
+    },
+    {
+      "parameters": {
+        "content": "## Execute Sub-workflow Trigger\n\n**Что делает:**\nПринимает данные от Main Workflow:\n- workflowJson (объект воркфлоу)\n- businessTask (описание задачи)\n- templateName (название)\n- templateUrl (ссылка)\n\n**Почему:**\nЭто точка входа для тестирования каждого шаблона. Main передаёт сюда один воркфлоу за раз.",
+        "height": 296,
+        "width": 384,
+        "color": 7
+      },
+      "id": "26d72b54-f503-4879-9fb7-d7fe0410af5f",
+      "name": "📥 Trigger",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -976,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Структурный анализ\n\n**Что делает:**\nПарсит JSON воркфлоу:\n- Проверяет триггер, connections, ноды\n- Выставляет score 0-100\n- Определяет внешние ноды (инвертированная логика)\n\n**Почему:**\nСамая дешёвая проверка — отсекает 80% мусора без API. Готовит список externalNodes для Level 3.",
+        "height": 300,
+        "width": 320,
+        "color": 7
+      },
+      "id": "2f7a4284-53dd-495e-a4b1-e9075daff65d",
+      "name": "🔍 Level 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -576,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Можно ли API тест?\n\n**Что делает:**\nПроверяет условие:\n```\ncanApiTest = нет community нод\n  && не Error Trigger\n  && нет битых connections\n  && воркфлоу собран\n```\n\n**Почему:**\nPre-flight check. Экономим API calls — тестируем только валидные кандидаты.\n\nTRUE → API-валидация\nFALSE → сразу в финальный отчёт",
+        "height": 340,
+        "width": 320,
+        "color": 7
+      },
+      "id": "bce6304a-b748-48cc-9fc7-4c419c2b7b1f",
+      "name": "🚦 Gate",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -272
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Подготовка к API-тесту\n\n**Что делает:**\n1. Заменяет триггер на webhook (POST, lastNode)\n2. Удаляет credentials\n3. Формирует cleanWorkflow\n4. Генерирует уникальный webhookPath\n\n**Почему:**\nAPI n8n не примет воркфлоу с оригинальным триггером или credentials. Готовим \"тестовую версию\".",
+        "height": 340,
+        "width": 304,
+        "color": 7
+      },
+      "id": "107b2a4b-5c45-4db7-9cde-94cd97960632",
+      "name": "🔧 Prep",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        112,
+        -544
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Создать воркфлоу\n\n**Что делает:**\nPOST к `/api/v1/workflows`\nОтправляет cleanWorkflow\n\n**Почему:**\nПроверяет что n8n примет JSON. Если упадёт → структура битая.\n\n**Оценка:** +20 баллов если успех\n\n**On Error:** Continue",
+        "height": 300,
+        "width": 280,
+        "color": 7
+      },
+      "id": "05763cc0-1450-45fd-9956-d20843945f4f",
+      "name": "➕ Create",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        416,
+        -512
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Активировать воркфлоу\n\n**Что делает:**\nPOST к `/workflows/{id}/activate`\n\n**Почему:**\nАктивация проверяет что:\n- Все ноды существуют в n8n\n- Parameters валидны\n- typeVersion поддерживаются\n- Воркфлоу готов к production\n\n**Оценка:** +30 баллов если успех\n\n**On Error:** Continue",
+        "height": 340,
+        "width": 280,
+        "color": 7
+      },
+      "id": "38d0b01f-6338-4729-ba3f-f36a6d653065",
+      "name": "▶️ Activate",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        704,
+        -544
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Активация прошла?\n\n**Что делает:**\nПроверяет `response.active === true`\nType Validation: **Loose**\n\n**Почему:**\nn8n иногда возвращает active как строку, иногда как boolean. Loose обрабатывает оба.\n\nTRUE → Level 3 (моки + запуск)\nFALSE → Оценка без запуска",
+        "height": 300,
+        "width": 280,
+        "color": 7
+      },
+      "id": "71e15edc-5624-4e30-a5c5-19577456179a",
+      "name": "✅ Check",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        992,
+        -800
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## OpenAI Chat Model1\n\n**Что делает:**\nПредоставляет модель gpt-4o-mini для LLM Chain\n\n**Почему:**\n- gpt-4o-mini достаточно для генерации моков\n- Дешевле чем gpt-4\n- Подключается через ai_languageModel к LLM Chain\n\n**Не путать:** это не нода для прямого вызова, а sub-connection для цепочки",
+        "height": 380,
+        "width": 280,
+        "color": 5
+      },
+      "id": "3dd03e37-f3e2-4919-9c03-f5c47b4a0437",
+      "name": "🧠 Model",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1424,
+        -448
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## LLM генерирует моки\n\n**Что делает:**\nОтправляет LLM промпт:\n- businessTask\n- список externalNodes\n- шаблоны моков для 20+ типов нод\n\nВозвращает JSON: `{ \"mocks\": { \"NodeName\": {...} } }`\n\n**Почему:**\nКонтекстные моки лучше дефолтных. LLM видит задачу воркфлоу и генерирует релевантные данные.",
+        "height": 340,
+        "width": 300,
+        "color": 7
+      },
+      "id": "1d13cc43-0ce6-4431-8f4e-d237976e7d9e",
+      "name": "🤖 LLM",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1296,
+        -944
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Парсинг и подготовка к запуску\n\n**Что делает:**\n1. Парсит JSON от LLM (убирает ```json)\n2. Заменяет внешние ноды на Code-заглушки:\n   `return [{ json: mockData }]`\n3. Сохраняет имена нод (connections привязаны к именам!)\n\n**Почему:**\nМокирование внешних нод симулирует успех интеграций. Проверяем логику обработки данных, не API calls.",
+        "height": 360,
+        "width": 320,
+        "color": 7
+      },
+      "id": "57b9bb7a-f1e5-4663-91b1-73db2f3362d2",
+      "name": "🔄 Mock",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1616,
+        -976
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Обновить воркфлоу\n\n**Что делает:**\nPUT к `/workflows/{id}`\nОтправляет воркфлоу с замокированными нодами\n\n**Почему:**\nПерезаписываем тестовый воркфлоу — теперь внешние ноды стали Code-заглушками. Готово к запуску!\n\n**Method:** PUT (не POST!)\n**On Error:** Continue",
+        "height": 300,
+        "width": 280,
+        "color": 7
+      },
+      "id": "64ca0c03-1103-47b1-8005-9a9f43130bbc",
+      "name": "🔄 Update",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1984,
+        -944
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Wait\n\n**Что делает:**\nЖдёт 3 секунды\n\n**Почему:**\nПосле PUT n8n нужно время чтобы перерегистрировать webhook-пути. Без паузы запрос к webhook вернёт 404.\n\n**Можно увеличить:** до 5-7 сек если нестабильно",
+        "height": 280,
+        "color": 7
+      },
+      "id": "8346347d-2cb8-4d33-9ba8-fa86aaf6c739",
+      "name": "⏰ Wait",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2320,
+        -896
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Запустить webhook\n\n**Что делает:**\nPOST к `/webhook/{path}`\nОтправляет: `{ \"test\": true, \"source\": \"tester\" }`\n\n**Почему:**\nРеальный запуск воркфлоу с моками. responseMode: lastNode → webhook ждёт выполнения и возвращает данные последней ноды.\n\n**Timeout:** 30 сек\n**On Error:** Continue",
+        "height": 352,
+        "width": 280,
+        "color": 7
+      },
+      "id": "485cc2c2-1903-410f-8476-955f6a78d362",
+      "name": "🚀 Run",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2608,
+        -992
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Оценка запуска\n\n**Что делает:**\nАнализирует response от webhook:\n- Есть данные → +25 баллов\n- Данные содержательные → +30 баллов\n- Логирует замокированные ноды\n\n**Почему:**\nLevel 3 проверяет что логика воркфлоу работает. Даже с моками можем увидеть что данные проходят по цепочке корректно.",
+        "height": 320,
+        "width": 300,
+        "color": 7
+      },
+      "id": "c1c94f46-b902-443e-8945-fa7e4b972feb",
+      "name": "📊 Eval",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2928,
+        -960
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Оценка без запуска\n\n**Что делает:**\nFallback когда активация упала:\n- apiScore = 20 (создание) + 5 (частичный)\n- runScore = 0\n- runTestDone = false\n\n**Почему:**\nДаже если активация не прошла — воркфлоу хотя бы создался. Фиксируем частичный успех, не 0 баллов.",
+        "height": 300,
+        "width": 280,
+        "color": 7
+      },
+      "id": "9c25d513-e0a6-492a-8431-99fbf02a6d0d",
+      "name": "📋 Fallback",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1328,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Деактивировать воркфлоу\n\n**Что делает:**\nPOST к `/workflows/{workflowId}/deactivate`\n\n**Почему:**\nТестовый воркфлоу больше не нужен. Активные webhook'и висят в памяти n8n. Clean up после теста.\n\n**ID from:** `$json.workflowId` (прокинут из обеих веток оценки)\n**On Error:** Continue",
+        "height": 396,
+        "width": 280,
+        "color": 7
+      },
+      "id": "e22d1e82-579a-4130-8657-f506310df9f9",
+      "name": "⏸️ Deactivate",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3280,
+        -800
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Удалить воркфлоу\n\n**Что делает:**\nDELETE к `/workflows/{id}`\n\n**Почему:**\nПолная очистка. Тестовый воркфлоу удаляется из n8n. Инстанс не захламляется.\n\n**ID from:** `$json.id || $json.workflowId` (fallback если деактивация упала)\n**On Error:** Continue",
+        "height": 300,
+        "width": 260,
+        "color": 7
+      },
+      "id": "b42d4637-1fe3-484d-be0c-92f38ab85112",
+      "name": "🗑️ Delete",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3584,
+        -704
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Сборка результатов\n\n**Что делает:**\nОбъединяет данные из той ветки оценки, которая сработала:\n- Если Level 3 → apiScore = 50 (полный успех)\n- Если нет → берёт из \"Оценка без запуска\"\n\n**Почему:**\nДве ветки оценки могут выдать разные данные. Собираем финальный объект перед отчётом.",
+        "height": 300,
+        "width": 280,
+        "color": 7
+      },
+      "id": "25184e83-222c-4701-939e-68b6e7be0432",
+      "name": "📦 Merge",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3920,
+        -672
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Финальный отчёт\n\n**Что делает:**\nВычисляет итоговый score:\n- Полный тест: 40% структура + 35% API + 25% запуск\n- API без запуска: 50% структура + 50% API\n- Только структура: 100% структура\n\nПорог: 60 баллов\n\n**Почему:**\nWeighted scoring отражает важность каждого уровня. Возвращает результат Main Workflow.",
+        "height": 360,
+        "width": 300,
+        "color": 7
+      },
+      "id": "01dcc121-884c-4cb5-9f11-0da4de520b8e",
+      "name": "📄 Report",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        4240,
+        -480
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 📘 Tester Sub-workflow Overview\n\n**Три уровня проверки:**\n\n**Level 1:** Структурный анализ (0-100)\n- Парсинг JSON, connections, ноды\n- Работает для всех воркфлоу\n\n**Level 2:** API-валидация (0-50)\n- Создание + активация в n8n\n- Только для валидных кандидатов\n\n**Level 3:** Запуск с моками (0-30)\n- LLM генерирует моки → замена нод → запуск\n- Только если активация успешна\n\n**Итого:** max 180 баллов → нормализуется к 100\n**Порог прохождения:** 60 баллов",
+        "height": 480,
+        "width": 400,
+        "color": 4
+      },
+      "id": "f484a9ec-cb69-4210-bca1-b02ce878dbbb",
+      "name": "📘 Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1440,
+        -384
+      ]
+    }
+  ],
+  "connections": {
+    "Execute Sub-workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Структурный анализ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Создать воркфлоу": {
+      "main": [
+        [
+          {
+            "node": "Активировать воркфлоу",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Активировать воркфлоу": {
+      "main": [
+        [
+          {
+            "node": "Активация прошла?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Финальный отчёт": {
+      "main": [
+        []
+      ]
+    },
+    "Деактивировать воркфлоу": {
+      "main": [
+        [
+          {
+            "node": "Удалить воркфлоу",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Структурный анализ": {
+      "main": [
+        [
+          {
+            "node": "Можно ли API тест?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Можно ли API тест?": {
+      "main": [
+        [
+          {
+            "node": "Подготовка к API-тесту",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Финальный отчёт",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Удалить воркфлоу": {
+      "main": [
+        [
+          {
+            "node": "Сборка результатов",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Подготовка к API-тесту": {
+      "main": [
+        [
+          {
+            "node": "Создать воркфлоу",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LLM генерирует моки",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Активация прошла?": {
+      "main": [
+        [
+          {
+            "node": "LLM генерирует моки",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Оценка без запуска",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM генерирует моки": {
+      "main": [
+        [
+          {
+            "node": "Парсинг и подготовка к запуску",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Парсинг и подготовка к запуску": {
+      "main": [
+        [
+          {
+            "node": "Обновить воркфлоу",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Обновить воркфлоу": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Запустить webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Запустить webhook": {
+      "main": [
+        [
+          {
+            "node": "Оценка запуска",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Оценка без запуска": {
+      "main": [
+        [
+          {
+            "node": "Деактивировать воркфлоу",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Оценка запуска": {
+      "main": [
+        [
+          {
+            "node": "Деактивировать воркфлоу",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Сборка результатов": {
+      "main": [
+        [
+          {
+            "node": "Финальный отчёт",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  }
+}

@@ -1,0 +1,235 @@
+{
+  "name": "Дни рождения сотрудников — напоминание директору",
+  "nodes": [
+    {
+      "id": "e921fb29-703b-4cf0-8888-311c398c828b",
+      "name": "Каждый день в 10:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        96
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 10,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "72a66493-6c0c-41a2-a54a-df3dfda5102d",
+      "name": "Читать базу с диска",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        224,
+        96
+      ],
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "/home/node/.n8n-files/employees.xlsx",
+        "options": {}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "8c4b8ac0-566d-4187-a7aa-04e242d25424",
+      "name": "Тревога: база недоступна",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        448,
+        192
+      ],
+      "parameters": {
+        "fromEmail": "Школа · напоминания <user@example.com>",
+        "toEmail": "user@example.com",
+        "subject": "Напоминания о днях рождения: файл базы не найден",
+        "emailFormat": "text",
+        "text": "=Не удалось прочитать файл базы:\\n/home/node/.n8n-files/employees.xlsx\\n\\nОшибка: {{ $json.error || 'файл недоступен' }}\\n\\nНапоминания на сегодня не отправлены. Проверьте, что файл на месте.",
+        "options": {
+          "appendAttribution": false
+        }
+      }
+    },
+    {
+      "id": "415c1643-1c0f-43bb-b44b-b479e2139bc5",
+      "name": "Excel в строки",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "operation": "xlsx",
+        "options": {
+          "headerRow": false,
+          "rawData": true
+        }
+      }
+    },
+    {
+      "id": "28878d34-fae6-4b1d-b8ee-67deb198a68f",
+      "name": "Найти именинников",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "/**\n * Дни рождения сотрудников школы → письмо директору.\n *\n * Вход:  строки Excel из ноды \"Extract From File\" (headerRow = false, rawData = true)\n * Выход: ровно один item { send, count, subject, html, text, debug }\n *\n * Ноду \"Send Email\" запускаем только если send === true.\n */\n\n// ─────────── Настройки (правятся прямо здесь) ───────────\nconst TZ = 'Europe/Moscow'; // по какому времени считается «сегодня»\nconst LEAD_DAYS = 3; // за сколько дней предупреждать заранее\nconst SHOW_PHONE = true; // показывать мобильный телефон в письме\nconst SCHOOL = 'ГБОУ Школа № 0000';\nconst JUBILEE_FROM = 50; // с какого возраста круглые даты помечать как юбилей\n\n// ─────────── 1. Приводим вход к массиву строк ───────────\nconst rows = $input.all().map((item) => {\n  const j = item.json ?? {};\n  if (Array.isArray(j)) return j;\n  if (Array.isArray(j.row)) return j.row;\n  return Object.values(j);\n});\n\n// ─────────── 2. Ищем колонки по заголовкам ───────────\n// Так выгрузка из 1С может менять расположение столбцов — система не сломается.\nconst HEAD = {\n  name: ['сотрудник', 'фио', 'ф.и.о.', 'сотрудники'],\n  dob: ['дата рождения', 'дата рождения сотрудника'],\n  post: ['должность'],\n  phone: ['физическое лицо.мобильный телефон', 'мобильный телефон', 'телефон'],\n};\nconst col = { name: 0, dob: 3, post: 6, phone: 11 }; // запасной вариант — текущий формат выгрузки\nlet headerRow = -1;\n\nrows.forEach((r, i) =>\n  r.forEach((cell, c) => {\n    const t = String(cell ?? '')\n      .trim()\n      .toLowerCase();\n    if (!t) return;\n    for (const key of Object.keys(HEAD)) {\n      if (HEAD[key].includes(t)) {\n        col[key] = c;\n        headerRow = Math.max(headerRow, i);\n      }\n    }\n  }),\n);\n\n// ─────────── 3. Разбор дат (ISO, дд.мм.гггг, серийный номер Excel) ───────────\nfunction parseDate(v) {\n  if (v === null || v === undefined || v === '') return null;\n\n  if (v instanceof Date && !isNaN(v)) {\n    return new Date(Date.UTC(v.getUTCFullYear(), v.getUTCMonth(), v.getUTCDate()));\n  }\n  if (typeof v === 'number') {\n    // серийная дата Excel: 1 = 01.01.1900, точка отсчёта 30.12.1899\n    return new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000);\n  }\n\n  const s = String(v).trim();\n  let m = s.match(/^(\\d{4})-(\\d{1,2})-(\\d{1,2})/); // 1983-04-17 / 1983-04-17T00:00:00.000Z\n  if (m) return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));\n\n  m = s.match(/^(\\d{1,2})[.\\/-](\\d{1,2})[.\\/-](\\d{4})/); // 17.04.1983\n  if (m) return new Date(Date.UTC(+m[3], +m[2] - 1, +m[1]));\n\n  const d = new Date(s);\n  return isNaN(d) ? null : new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));\n}\n\n// ─────────── 4. Собираем список сотрудников ───────────\nconst cell = (r, i) => (i != null && i < r.length ? r[i] : null);\nconst people = [];\n\nfor (const r of rows.slice(headerRow + 1)) {\n  const name = String(cell(r, col.name) ?? '').trim();\n  const dob = parseDate(cell(r, col.dob));\n  if (!name || !dob) continue;\n\n  people.push({\n    name,\n    dob,\n    post: String(cell(r, col.post) ?? '').trim(),\n    phone: String(cell(r, col.phone) ?? '').trim(),\n  });\n}\n\n// ─────────── 5. Сегодня и «через LEAD_DAYS дней» в нужном часовом поясе ───────────\nconst p = new Intl.DateTimeFormat('en-CA', {\n  timeZone: TZ,\n  year: 'numeric',\n  month: '2-digit',\n  day: '2-digit',\n})\n  .format(new Date())\n  .split('-')\n  .map(Number);\n\nconst today = new Date(Date.UTC(p[0], p[1] - 1, p[2]));\nconst soon = new Date(today.getTime() + LEAD_DAYS * 86400000);\n\n// ─────────── 6. Кто именинник ───────────\nconst isLeap = (y) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;\n\nfunction matches(dob, day) {\n  if (dob.getUTCMonth() === day.getUTCMonth() && dob.getUTCDate() === day.getUTCDate()) return true;\n  // родившихся 29 февраля в невисокосный год поздравляем 28-го\n  if (dob.getUTCMonth() === 1 && dob.getUTCDate() === 29 && !isLeap(day.getUTCFullYear())) {\n    return day.getUTCMonth() === 1 && day.getUTCDate() === 28;\n  }\n  return false;\n}\n\nfunction yearsWord(n) {\n  if (n % 10 === 1 && n % 100 !== 11) return 'год';\n  if (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14)) return 'года';\n  return 'лет';\n}\n\nfunction daysWord(n) {\n  if (n % 10 === 1 && n % 100 !== 11) return 'день';\n  if (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14)) return 'дня';\n  return 'дней';\n}\n\nfunction collect(day) {\n  return people\n    .filter((x) => matches(x.dob, day))\n    .map((x) => {\n      const age = day.getUTCFullYear() - x.dob.getUTCFullYear();\n      return {\n        ...x,\n        age,\n        ageText: `${age} ${yearsWord(age)}`,\n        jubilee: age >= JUBILEE_FROM && age % 5 === 0,\n        dobText: `${String(x.dob.getUTCDate()).padStart(2, '0')}.${String(x.dob.getUTCMonth() + 1).padStart(2, '0')}.${x.dob.getUTCFullYear()}`,\n      };\n    })\n    .sort((a, b) => a.name.localeCompare(b.name, 'ru'));\n}\n\nconst todayList = collect(today);\nconst soonList = collect(soon);\nconst count = todayList.length + soonList.length;\n\n// ─────────── 7. Если базу прочитать не удалось — предупреждаем ───────────\nconst fmtDay = (d) =>\n  new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', day: 'numeric', month: 'long' }).format(d);\nconst fmtWeekday = (d) =>\n  new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', weekday: 'long' }).format(d);\n\nif (people.length === 0) {\n  return [\n    {\n      json: {\n        send: true,\n        alert: true,\n        count: 0,\n        subject: '⚠️ Напоминание о днях рождения: не удалось прочитать базу',\n        text: 'Файл базы прочитан, но ни одной записи с ФИО и датой рождения не найдено. Проверьте формат файла.',\n        html: `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#222\">\n<p><b>Не удалось прочитать базу дней рождения.</b></p>\n<p>Файл открылся, но ни одной строки с ФИО и датой рождения в нём не найдено — вероятно, изменился формат выгрузки.</p>\n<p>Получено строк из файла: ${rows.length}. Строка заголовка: ${headerRow + 1}.</p>\n<p style=\"color:#666\">Сегодняшние напоминания не отправлены.</p></div>`,\n        debug: { rows: rows.length, headerRow: headerRow + 1, col },\n      },\n    },\n  ];\n}\n\n// ─────────── 8. Ничего не отправляем, если именинников нет ───────────\nif (count === 0) {\n  return [\n    {\n      json: {\n        send: false,\n        count: 0,\n        subject: '',\n        html: '',\n        text: '',\n        debug: { people: people.length, headerRow: headerRow + 1, col },\n      },\n    },\n  ];\n}\n\n// ─────────── 9. Письмо ───────────\nfunction card(x) {\n  const badge = x.jubilee\n    ? ' <span style=\"background:#fff2cc;border:1px solid #e0c200;border-radius:3px;padding:1px 6px;font-size:12px\">ЮБИЛЕЙ</span>'\n    : '';\n  const phone =\n    SHOW_PHONE && x.phone\n      ? `<div style=\"color:#666;font-size:13px;margin-top:2px\">тел. ${x.phone}</div>`\n      : '';\n  return `<tr><td style=\"padding:10px 12px;border-bottom:1px solid #eee\">\n<div style=\"font-size:16px\"><b>${x.name}</b>${badge}</div>\n<div style=\"color:#444;font-size:14px;margin-top:2px\">${x.post || '—'}</div>\n<div style=\"color:#444;font-size:14px;margin-top:2px\">исполняется <b>${x.ageText}</b> <span style=\"color:#888\">(род. ${x.dobText})</span></div>\n${phone}</td></tr>`;\n}\n\nfunction block(title, list, color) {\n  if (!list.length) return '';\n  return `<div style=\"margin:0 0 22px\">\n<div style=\"background:${color};color:#fff;padding:8px 12px;font-size:15px;border-radius:4px 4px 0 0\"><b>${title}</b></div>\n<table style=\"border-collapse:collapse;width:100%;border:1px solid #eee;border-top:none\">${list.map(card).join('')}</table>\n</div>`;\n}\n\nconst lead = `${LEAD_DAYS} ${daysWord(LEAD_DAYS)}`;\nconst short = (list) => list.map((x) => x.name.split(' ')[0]).join(', ');\n\nconst subjParts = [];\nif (todayList.length) subjParts.push(`сегодня — ${short(todayList)}`);\nif (soonList.length) subjParts.push(`через ${lead} — ${short(soonList)}`);\n\nconst html = `<div style=\"font-family:Arial,Helvetica,sans-serif;color:#222;max-width:640px\">\n<div style=\"font-size:18px;margin:0 0 16px\"><b>Дни рождения сотрудников</b><br>\n<span style=\"color:#666;font-size:14px\">${SCHOOL} · ${fmtDay(today)}</span></div>\n${block(`Сегодня, ${fmtDay(today)}`, todayList, '#c0392b')}\n${block(`Через ${lead} — ${fmtDay(soon)}, ${fmtWeekday(soon)}`, soonList, '#2c7a3f')}\n<div style=\"color:#999;font-size:12px;border-top:1px solid #eee;padding-top:10px\">\nАвтоматическое напоминание. В базе ${people.length} сотрудников.</div></div>`;\n\nconst line = (x) =>\n  `  • ${x.name} — ${x.post} — исполняется ${x.ageText}${x.jubilee ? ' (ЮБИЛЕЙ)' : ''}`;\n\nconst text = [\n  todayList.length ? `СЕГОДНЯ (${fmtDay(today)}):` : '',\n  ...todayList.map(line),\n  soonList.length ? `\\nЧЕРЕЗ ${lead.toUpperCase()} (${fmtDay(soon)}, ${fmtWeekday(soon)}):` : '',\n  ...soonList.map(line),\n]\n  .filter(Boolean)\n  .join('\\n');\n\nreturn [\n  {\n    json: {\n      send: true,\n      alert: false,\n      count,\n      subject: `🎂 Дни рождения: ${subjParts.join('; ')}`,\n      html,\n      text,\n      debug: { people: people.length, headerRow: headerRow + 1, col, leadDays: LEAD_DAYS },\n    },\n  },\n];\n"
+      }
+    },
+    {
+      "id": "55f094a7-6b8a-47bd-9604-b6bcc28f9548",
+      "name": "Есть кого поздравлять?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.send }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "960c0cea-04e4-4bef-81d5-955080ab829e",
+      "name": "Письмо директору",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "fromEmail": "Школа · напоминания <user@example.com>",
+        "toEmail": "user@example.com",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "both",
+        "text": "={{ $json.text }}",
+        "html": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      }
+    },
+    {
+      "id": "3950e0bc-b25c-4fb6-94db-0f6ad458807c",
+      "name": "Sticky Note 6c666e5f",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -50,
+        -50
+      ],
+      "parameters": {
+        "content": "## Дни рождения сотрудников\\n\\nБаза: `/home/node/.n8n-files/employees.xlsx` внутри контейнера n8n.\\nОбновление — положить новый .xlsx на то же место (`tools/update_db.sh`).\\n\\n**Перед включением:**\\n1. Заполнить креденшл `mail.ru SMTP` (smtp.mail.ru:465, SSL, пароль для внешних приложений).\\n2. Заменить `user@example.com` на ящик робота.\\n3. Получатель сейчас `user@example.com` — поменять на почту директора.\\n\\nПисьмо уходит каждый день в 08:00, только если есть именинники сегодня или завтра.",
+        "color": 4,
+        "width": 300,
+        "height": 200
+      }
+    }
+  ],
+  "connections": {
+    "Читать базу с диска": {
+      "main": [
+        [
+          {
+            "node": "Excel в строки",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Тревога: база недоступна",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Excel в строки": {
+      "main": [
+        [
+          {
+            "node": "Найти именинников",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Найти именинников": {
+      "main": [
+        [
+          {
+            "node": "Есть кого поздравлять?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Есть кого поздравлять?": {
+      "main": [
+        [
+          {
+            "node": "Письмо директору",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Каждый день в 10:00": {
+      "main": [
+        [
+          {
+            "node": "Читать базу с диска",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "nodeGroups": [],
+  "sourceWorkflowId": null,
+  "versionMetadata": {
+    "name": "Получатель — Назарова",
+    "description": "Updated nodes: Письмо директору"
+  }
+}

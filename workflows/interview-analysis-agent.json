@@ -1,0 +1,306 @@
+{
+  "name": "ZOOM_Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -120,
+        240
+      ],
+      "id": "56dfb6b5-f816-43f2-86b2-03a741cf3f85",
+      "name": "OpenAI Chat Model"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $(\"ZOOM_Agent\").item.json.sessionId }}",
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        20,
+        240
+      ],
+      "id": "83212dcd-8ad5-4327-8a2b-08d95c98aa69",
+      "name": "Simple Memory",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolSerpApi",
+      "typeVersion": 1,
+      "position": [
+        300,
+        260
+      ],
+      "id": "037c748f-ebf2-4c80-b236-2affa2d43ccb",
+      "name": "SerpAPI1",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.results.channels[0].alternatives[0].transcript }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=# Overview\nТы — AI-ассистент, который анализирует расшифровку интервью с кандидатом на работу. Интервью проходит в формате Zoom, и после расшифровки текста (с разделением по спикерам) тебе передается текст для анализа. Твоя задача — проанализировать ответы кандидата и на основе этого составить его психологический портрет и дать краткую сводку.\n\n## Контекст\n- Тебе передается текст интервью (уже разделенный по ролям: интервьюер и кандидат).\n- Основной фокус анализа — ответы кандидата, а не интервьюера.\n- На основе анализа ты должен составить структурированный отчет по личным качествам и профессиональным особенностям кандидата.\n- Представь, что ты высококласнный HR специалист и хорошо определеяешь тип личности человека.\n\n## Инструкции\n1. Игнорируй реплики интервьюера, концентрируйся только на ответах кандидата.\n2. Проанализируй стиль речи, содержание ответов и поведение кандидата в ходе интервью.\n3. По итогам анализа подготовь структурированный отчет по категориям, перечисленным ниже.\n4. Сохраняй объективность и лаконичность — отчет должен быть емким, но содержательным.\n5. В конце дай короткое резюме (3–5 предложений) об общем впечатлении от кандидата.\n\n## Категории анализа\n- Мотивация и карьерные цели\n- Уровень уверенности и самооценка\n- Эмоциональный интеллект (умение слушать, эмпатия)\n- Коммуникационные навыки\n- Стрессоустойчивость и реакция на сложные вопросы\n- Ценности и отношение к работе\n- Гибкость и готовность к обучению\n- Стиль мышления (аналитический, креативный, структурный и т.д.)\n- Общие риски или настораживающие моменты (если есть)\n\n## Формат ответа\n1. Для каждой категории сделай короткий вывод в 1–2 предложения.\n2. В конце напиши раздел \"Итоговая сводка\", где дай общую характеристику кандидата в 3–5 предложениях.\n\n## Финальные заметки\n- Пиши отчет на русском языке.\n- Не используй формальные вводные фразы, сразу переходи к сути.\n- Отчет должен быть понятен HR-специалисту, который принимает решение о дальнейшем рассмотрении кандидата.\n---\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "683bbc95-0f86-463d-bcd6-73cb60aa6042",
+      "name": "ZOOM_Agent"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.deepgram.com/v1/listen?detect_language=ru&detect_language=en&diarize=true",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "<AUTHORIZATION>"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"url\": \"https://drive.google.com/uc?export=view&id=<FILE_ID>\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -260,
+        0
+      ],
+      "id": "7bb12bd6-a5f0-4652-9b6a-3b7be056bc77",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "https://drive.google.com/drive/folders/<FOLDER_ID>",
+          "mode": "url"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        -420,
+        -600
+      ],
+      "id": "49a95387-8b89-462d-a1e3-cbd6622c0e58",
+      "name": "Google Drive Trigger",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        -220,
+        -600
+      ],
+      "id": "2723e6eb-41de-4d7b-9e05-f7580c3e9e55",
+      "name": "Transcribe a recording"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -540,
+        0
+      ],
+      "id": "5f2bee6f-3123-48a7-844b-51bac32632a9",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.assemblyai.com/v2/upload",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "<AUTHORIZATION>"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -320,
+        -320
+      ],
+      "id": "9c601958-a42d-4850-8571-4d7037bf74dd",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "fileSelector": "/data/interview.mp4",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        -520,
+        -320
+      ],
+      "id": "767bf1a8-de61-4eac-8555-76cad8c9d797",
+      "name": "Read/Write Files from Disk",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "https://docs.google.com/document/d/<DOCUMENT_ID>/edit?usp=sharing",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $json.output }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        360,
+        0
+      ],
+      "id": "1b8691a9-10fc-437b-ad6c-a397f6e95f76",
+      "name": "Update a document"
+    }
+  ],
+  "connections": {
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "ZOOM_Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "ZOOM_Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SerpAPI1": {
+      "ai_tool": [
+        []
+      ]
+    },
+    "Google Drive Trigger": {
+      "main": [
+        []
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "ZOOM_Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        []
+      ]
+    },
+    "Read/Write Files from Disk": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ZOOM_Agent": {
+      "main": [
+        [
+          {
+            "node": "Update a document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

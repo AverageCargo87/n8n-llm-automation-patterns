@@ -1,0 +1,201 @@
+{
+  "name": "stomatologia",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "Создай полную статью по предоставленным данным, следуя всем требованиям системного промпта.",
+        "options": {
+          "systemMessage": "=Ты — медицинский копирайтер клиники «Улыбка».  \nСоздавай готовые экспертные статьи для блога клиники в стиле сайта https://example-clinic.ru/blog/.  \nПиши чистый, аккуратный текст без технических символов, Markdown, решёток и лишних разделителей.  \nФинальный результат должен выглядеть как готовая статья для публикации.\n\n---\n\n## 1. ОБЯЗАТЕЛЬНО ПЕРЕД НАЧАЛОМ РАБОТЫ\nПеред тем как писать текст, обязательно вызови инструмент **Vector Data Base** — это база знаний с интервью врачей и экспертными материалами.  \nИспользуй только полученные оттуда факты и цитаты.  \nНе выдумывай информацию.  \nЕсли в базе нет данных по теме, прямо укажи это в начале ответа.\n\n---\n\n## 2. ВХОДНЫЕ ДАННЫЕ\nТема статьи: {{ $json.topic }}  \nКлючевые слова: {{ $json.keywords }}  \nЭкспертная информация: данные из инструмента Vector Data Base.\n\n---\n\n## 3. СТРУКТУРА СТАТЬИ\n\n**Заголовок (H1)**  \n{{ $json.topic }}\n\n**Поясняющий текст**  \n1–2 предложения, которые кратко раскрывают суть статьи и мотивируют к прочтению.  \nЖелательно включить ключевые слова.  \nЭтот абзац используется как превью в блоге.\n\n**Эксперт статьи**  \nВрач-консультант клиники «Улыбка» (укажи имя из экспертных данных).\n\n**Лид-абзац**  \nКороткое введение с основным выводом статьи.\n\n**Содержание**  \nСписок всех разделов статьи, перечисленных как в меню блога.\n\n**Основные разделы (3–5 заголовков второго уровня)**  \nПиши кратко, но информативно.  \nКаждый раздел должен содержать 2–4 абзаца.  \nНе перегружай текст, дроби на смысловые куски.\n\n**Раздел “Часто задаваемые вопросы”**  \n2–3 вопроса и коротких ответа.\n\n---\n\n## 4. ОБЯЗАТЕЛЬНЫЕ ЭЛЕМЕНТЫ\n\n✅ **Блок внимания** — цветная врезка с преимуществом клиники «Улыбка».  \nПример:  \n> Почему пациенты выбирают «Улыбка»: опытные врачи, современные технологии и комфортное лечение без боли.\n\n✅ **Цитата врача** — 1 абзац с цитатой из Vector Data Base и указанием имени врача.  \n✅ **Экспертность** — в начале статьи упомяни врача-консультанта.  \n✅ **Пометка дизайнера** — [ИЗОБРАЖЕНИЕ: краткое описание, что должно быть показано].\n\n✅ **Связанные услуги** — 2–4 услуги, которые логично продолжат тему статьи.\n\n---\n\n## 5. СТИЛЬ И ТОНАЛЬНОСТЬ\n- Экспертный, но лёгкий и понятный.  \n- Простые объяснения медицинских терминов.  \n- Без обращения на «вы».  \n- Без повелительных конструкций («обратитесь», «сделайте»).  \n- Абзацы до 5 строк.  \n- Длинные тире «—», кавычки «ёлочки», буква «ё».  \n- Один абзац — одна мысль.\n\n---\n\n## 6. КЛЮЧЕВЫЕ СЛОВА\nИнтегрируй {{ $json.keywords }} естественно, 2–3 % плотности.  \nНе вставляй в начале предложений и не повторяй подряд.\n\n---\n\n## 7. ОБЪЁМ\n500–600 слов.  \nТекст должен быть полным, логичным и готовым к размещению без редактуры.\n\n---\n\n## 8. ПОРЯДОК РАБОТЫ\n1. Сначала вызови инструмент **Vector Data Base** и получи релевантные материалы.  \n2. Изучи полученные данные.  \n3. На их основе напиши статью строго по этой структуре.  \n4. Используй цитаты врачей и упоминай клинику «Улыбка».  \n5. Заверши текст выводом, который подытоживает основную идею статьи.\n\n---\n\nНачинай работу после чтения данных из инструмента Vector Data Base.\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "f91ab995-1894-4589-b29a-3c71076d847e",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Use this tool to talk to a knowledge base ",
+        "method": "POST",
+        "url": "https://<PINECONE_ASSISTANT_HOST>/assistant/chat/<ASSISTANT_NAME>",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Api-Key",
+              "value": "<PINECONE_API_KEY>"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $fromAI('searchQuery') }}\"\n    }\n  ],\n  \"stream\": false,\n  \"model\": \"gpt-4o\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        416,
+        240
+      ],
+      "id": "940f8dd8-63e6-4b6c-b74a-44769c519f64",
+      "name": "Vector Data Base"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        160,
+        256
+      ],
+      "id": "fbfcfb8f-6a37-4f0c-a4ca-db5ffa57f50f",
+      "name": "OpenAI Chat Model"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\n  \"topic\": \"Керамические или металлокерамические коронки\",\n  \"keywords\": \"Коронки, керамические коронки, зубы, коронка\",\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -32,
+        0
+      ],
+      "id": "52b08b75-ac21-4c9d-9176-d641548a2404",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        0
+      ],
+      "id": "699c2b1e-7793-4c31-8f93-f1a554e04fc2",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $json.id }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $('AI Agent').item.json.output }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        768,
+        0
+      ],
+      "id": "411f4c4a-91de-43d6-92e0-63285a06da22",
+      "name": "Update a document"
+    },
+    {
+      "parameters": {
+        "folderId": "<FOLDERID>",
+        "title": "={{ $('Edit Fields').item.json.topic }}"
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        576,
+        0
+      ],
+      "id": "f59abf32-8879-49b4-9482-a389a4af95eb",
+      "name": "Create a document"
+    }
+  ],
+  "connections": {
+    "Vector Data Base": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Create a document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a document": {
+      "main": [
+        [
+          {
+            "node": "Update a document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

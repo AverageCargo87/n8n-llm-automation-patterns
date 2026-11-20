@@ -1,0 +1,2759 @@
+{
+  "name": "Builder v2.0 — 7-Stage Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Execute Sub-workflow Trigger\n**Что делает:**\nПринимает входные данные от оркестратора:\n- `businessTask` — описание задачи пользователя\n- `failedTemplates` — массив шаблонов которые не прошли тест\n\n**Почему:**\nBuilder вызывается как сабворкфлоу — это позволяет переиспользовать его и из Search-ветки (когда нет подходящих шаблонов) и из Build-ветки (когда пользователь сразу просит /build)",
+        "height": 316,
+        "width": 300
+      },
+      "id": "b8d4ed67-f86a-470f-980a-70a53e7eefea",
+      "name": "Sticky Note - Trigger",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1600,
+        -3568
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Контекст\n**Что делает:**\nФормирует контекст для LLM:\n- Берёт `businessTask` и `failedTemplates` из триггера\n- Добавляет `exampleWorkflow` — готовый пример валидного воркфлоу (Webhook → Set → Google Sheets)\n\n**Почему:**\nLLM без примера генерирует невалидный JSON. Конкретный пример с правильной структурой нод и connections резко повышает качество генерации.",
+        "height": 412,
+        "width": 236
+      },
+      "id": "ac814d6c-241b-4f0e-aa5e-a90c68293b41",
+      "name": "Sticky Note - Context",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1136,
+        -3600
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Генерация\n**Что делает:**\nPOST к `api.openai.com/v1/chat/completions`\n- Модель: `gpt-5.2`\n- Передаёт businessTask + exampleWorkflow + failedTemplates\n- Просит вернуть только JSON без обёрток\n- Timeout: 600 000 мс (10 минут)\n\n**Почему:**\nИспользуем HTTP Request вместо LangChain-ноды — у LangChain захардкожен 5-минутный timeout на уровне Node.js/undici который нельзя изменить. HTTP Request обходит это ограничение.",
+        "height": 484,
+        "width": 252
+      },
+      "id": "e004f574-09ed-424b-96b4-6077c4b43cec",
+      "name": "Sticky Note - Generation",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -640,
+        -3536
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Code in JavaScript (Extract)\n**Что делает:**\nИзвлекает текст из ответа OpenAI:\n`response.choices[0].message.content`\nЕсли ошибка API — пробрасывает её дальше для обработки\n\n**Почему:**\nOpenAI возвращает ответ внутри объекта choices[]. Нода Валидация ожидает поле `text` с сырым JSON-текстом.",
+        "height": 472,
+        "width": 204
+      },
+      "id": "1fbb8a71-b667-4f8b-87ea-391b2065f03a",
+      "name": "Sticky Note - Extract",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -368,
+        -3536
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Валидация\n**Что делает:**\n1. Парсит JSON из текста (убирает ```json обёртки)\n2. Проверяет наличие: name, nodes, connections\n3. Проверяет уникальность имён нод\n4. Проверяет что все connections ссылаются на существующие ноды\n5. Проверяет наличие триггер-ноды\n6. Удаляет credentials из нод\n\n**Почему:**\nLLM часто генерирует невалидный JSON или воркфлоу с дублями имён. Валидация перехватывает ошибки до загрузки в API.",
+        "height": 468,
+        "width": 236
+      },
+      "id": "2d75db60-79ef-480f-ad55-59e88064f53a",
+      "name": "Sticky Note - Validation",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -144,
+        -3536
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Валидно?\n**Что делает:**\nIF-нода: проверяет `$json.valid === true`\n- True → Code in JavaScript2 (очистка) → Пробная загрузка\n- False → Счётчик попыток\n\n**Почему:**\nРазделяет успешную генерацию от неудачной. При неудаче запускает цикл исправления — до 2 попыток.",
+        "height": 280,
+        "width": 300
+      },
+      "id": "64f6eb4c-9664-494c-865e-7a5dbe484ebd",
+      "name": "Sticky Note - IsValid",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        128,
+        -3344
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Code in JavaScript2 (Очистка)\n**Что делает:**\nОставляет в воркфлоу только поля которые принимает n8n API:\n`name, nodes, connections, settings`\nУдаляет: id, active, tags, createdAt, versionId и другие лишние поля из нод\n\n**Почему:**\nn8n API возвращает ошибку «must NOT have additional properties» если передать лишние поля. LLM иногда добавляет их из примера.",
+        "height": 326,
+        "width": 300
+      },
+      "id": "08e0df53-2491-44e5-88e6-5098668ba53a",
+      "name": "Sticky Note - Clean",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        720,
+        -3296
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Пробная загрузка\n**Что делает:**\nPOST к `n8n API /v1/workflows`\nСоздаёт воркфлоу в n8n инстансе\n\n**Почему:**\nЭто финальная проверка — если API принял воркфлоу, значит JSON валиден на уровне n8n. Сразу после этого воркфлоу удаляется (он нужен только для проверки, не для хранения).",
+        "height": 274,
+        "width": 300
+      },
+      "id": "dd6d50e3-0dad-487b-bc92-2c3655b2f439",
+      "name": "Sticky Note - TrialUpload",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        912,
+        -2384
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## API принял?\n**Что делает:**\nIF-нода: проверяет `$json.id is not equal to value2`\n(т.е. id существует и не пустой)\n- True → Удалить пробный → Результат\n- False → Ошибка API\n\n**Почему:**\nn8n API не всегда возвращает statusCode в теле. Проверка по наличию `id` надёжнее — он всегда есть при успешном создании.",
+        "height": 316,
+        "width": 300
+      },
+      "id": "beeaae49-aa49-4aa5-b205-406486e269e4",
+      "name": "Sticky Note - ApiCheck",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1248,
+        -2432
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Удалить пробный\n**Что делает:**\nDELETE к `n8n API /v1/workflows/{id}`\nУдаляет только что созданный тестовый воркфлоу\n\n**Почему:**\nПробная загрузка нужна только для валидации структуры. Реальный воркфлоу будет создан пользователем вручную через импорт JSON. Мы не захламляем инстанс.",
+        "height": 290,
+        "width": 300
+      },
+      "id": "a43f3e30-f2dd-42d6-998c-c4be3167cf9b",
+      "name": "Sticky Note - Delete",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1568,
+        -2416
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Результат\n**Что делает:**\nФормирует финальный объект:\n- `success: true`\n- `workflowJson` — готовый воркфлоу\n- `workflowName` — имя воркфлоу\n- `businessTask` — исходная задача\n- `summary` — описание результата\n\n**Почему:**\nОркестратор ожидает стандартизированный ответ от Builder чтобы передать его в Tester или напрямую пользователю.",
+        "height": 342,
+        "width": 300
+      },
+      "id": "55c5a704-326b-434a-b90f-0ee0830a143a",
+      "name": "Sticky Note - Result",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1904,
+        -2464
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const searchResult = $input.first().json;\nconst ctx = $('Контекст').first().json;\n\n// Извлекаем текст документации из ответа MCP\nlet nodesDocs = '';\ntry {\n  const content = searchResult?.result?.content;\n  if (Array.isArray(content)) {\n    nodesDocs = content.map(c => c.text || '').join('\\n');\n  } else if (typeof content === 'string') {\n    nodesDocs = content;\n  }\n} catch(e) {\n  nodesDocs = 'Документация нод недоступна';\n}\n\nreturn [{\n  json: {\n    ...ctx,\n    nodesDocs: nodesDocs.substring(0, 8000) // ограничиваем размер\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -896,
+        -2912
+      ],
+      "id": "097a5de7-0335-4502-8552-45f6cc96d5e9",
+      "name": "Restore After Search"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst ctx = $('Парсинг результатов').first().json;\n\nlet allDocs = ctx.searchSummary + '\\n\\n';\n\nfor (const item of items) {\n  const data = item.json;\n  const content = data?.result?.content;\n  let text = '';\n  \n  if (Array.isArray(content)) {\n    text = content.map(c => c.text || '').join('\\n');\n  } else if (typeof content === 'string') {\n    text = content;\n  }\n  \n  if (text) {\n    allDocs += text.substring(0, 2000) + '\\n\\n';\n  }\n}\n\nreturn [{\n  json: {\n    businessTask: ctx.businessTask,\n    failedTemplates: ctx.failedTemplates || '[]',\n    exampleWorkflow: ctx.exampleWorkflow,\n    rules: ctx.rules,\n    nodesDocs: allDocs.substring(0, 10000)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        -2896
+      ],
+      "id": "6277e411-6b51-40d7-9323-f51ff0888860",
+      "name": "Сборка документации"
+    },
+    {
+      "parameters": {
+        "jsCode": "const example = {\n  name: \"Webhook to Google Sheets\",\n  nodes: [\n    { id: \"wh-1\", name: \"Webhook\", type: \"n8n-nodes-base.webhook\", typeVersion: 2,\n      position: [250, 300], parameters: { httpMethod: \"POST\", path: \"my-hook\", responseMode: \"lastNode\", options: {} } },\n    { id: \"set-1\", name: \"Prepare Data\", type: \"n8n-nodes-base.set\", typeVersion: 3.4,\n      position: [450, 300], parameters: { mode: \"manual\", assignments: { assignments: [\n        { id: \"f1\", name: \"name\", value: \"={{ $json.body.name }}\", type: \"string\" },\n        { id: \"f2\", name: \"email\", value: \"={{ $json.body.email }}\", type: \"string\" }\n      ] }, options: {} } },\n    { id: \"gs-1\", name: \"Google Sheets\", type: \"n8n-nodes-base.googleSheets\", typeVersion: 4.5,\n      position: [650, 300], parameters: { operation: \"appendOrUpdate\", documentId: { __rl: true, mode: \"id\", value: \"\" }, sheetName: { __rl: true, mode: \"name\", value: \"Sheet1\" }, columns: { mappingMode: \"autoMapInputData\" }, options: {} } }\n  ],\n  connections: {\n    \"Webhook\": { main: [[{ node: \"Prepare Data\", type: \"main\", index: 0 }]] },\n    \"Prepare Data\": { main: [[{ node: \"Google Sheets\", type: \"main\", index: 0 }]] }\n  },\n  settings: { executionOrder: \"v1\" }\n};\n\nconst ifExample = {\n  name: \"IF routing example\",\n  nodes: [\n    { id: \"wh-1\", name: \"Webhook\", type: \"n8n-nodes-base.webhook\", typeVersion: 2,\n      position: [250, 300], parameters: { httpMethod: \"POST\", path: \"route\", responseMode: \"lastNode\", options: {} } },\n    { id: \"if-1\", name: \"Check Type\", type: \"n8n-nodes-base.if\", typeVersion: 2.3,\n      position: [450, 300], parameters: {\n        conditions: { options: { typeValidation: \"loose\", version: 3 },\n          conditions: [{ id: \"c1\", leftValue: \"={{ $json.body.type }}\", rightValue: \"email\",\n            operator: { type: \"string\", operation: \"equals\" } }], combinator: \"and\" }, options: {} } },\n    { id: \"http-1\", name: \"Path A\", type: \"n8n-nodes-base.httpRequest\", typeVersion: 4.3,\n      position: [650, 180], parameters: { method: \"POST\", url: \"https://api.example.com/a\", options: {} } },\n    { id: \"http-2\", name: \"Path B\", type: \"n8n-nodes-base.httpRequest\", typeVersion: 4.3,\n      position: [650, 420], parameters: { method: \"POST\", url: \"https://api.example.com/b\", options: {} } }\n  ],\n  connections: {\n    \"Webhook\": { main: [[{ node: \"Check Type\", type: \"main\", index: 0 }]] },\n    \"Check Type\": { main: [\n      [{ node: \"Path A\", type: \"main\", index: 0 }],\n      [{ node: \"Path B\", type: \"main\", index: 0 }]\n    ]}\n  },\n  settings: { executionOrder: \"v1\" }\n};\n\nconst httpExample = {\n  name: \"HTTP with context restore\",\n  nodes: [\n    { id: \"wh-1\", name: \"Webhook\", type: \"n8n-nodes-base.webhook\", typeVersion: 2,\n      position: [250, 300], parameters: { httpMethod: \"POST\", path: \"http-example\", responseMode: \"lastNode\", options: {} } },\n    { id: \"set-1\", name: \"Prepare\", type: \"n8n-nodes-base.set\", typeVersion: 3.4,\n      position: [450, 300], parameters: { mode: \"manual\", assignments: { assignments: [\n        { id: \"f1\", name: \"userId\", value: \"={{ $json.body.userId }}\", type: \"string\" },\n        { id: \"f2\", name: \"action\", value: \"={{ $json.body.action }}\", type: \"string\" }\n      ] }, options: {} } },\n    { id: \"http-1\", name: \"Call External API\", type: \"n8n-nodes-base.httpRequest\", typeVersion: 4.3,\n      position: [650, 300], parameters: {\n        method: \"POST\",\n        url: \"https://api.example.com/process\",\n        authentication: \"genericCredentialType\",\n        genericAuthType: \"httpBearerAuth\",\n        sendBody: true,\n        specifyBody: \"json\",\n        jsonBody: \"={{ JSON.stringify({ userId: $json.userId, action: $json.action }) }}\",\n        options: { timeout: 30000, response: { response: { neverError: true, responseFormat: \"json\" } } }\n      } },\n    { id: \"code-1\", name: \"Restore Context\", type: \"n8n-nodes-base.code\", typeVersion: 2,\n      position: [850, 300], parameters: { jsCode: \"const apiResponse = $input.first().json;\\nconst ctx = $('Prepare').first().json;\\nif (apiResponse.error) {\\n  throw new Error('API error: ' + JSON.stringify(apiResponse.error));\\n}\\nreturn [{ json: { ...ctx, result: apiResponse } }];\" } }\n  ],\n  connections: {\n    \"Webhook\": { main: [[{ node: \"Prepare\", type: \"main\", index: 0 }]] },\n    \"Prepare\": { main: [[{ node: \"Call External API\", type: \"main\", index: 0 }]] },\n    \"Call External API\": { main: [[{ node: \"Restore Context\", type: \"main\", index: 0 }]] }\n  },\n  settings: { executionOrder: \"v1\" }\n};\n\nconst rules = [\n  'ОБЯЗАТЕЛЬНЫЕ ПРАВИЛА:',\n  '',\n  '[ОБЪЁМ ЗАДАЧИ]',\n  '- Реализуй ТОЛЬКО то что явно указано в задаче — никаких дополнительных фич по своей инициативе',\n  '- Если в задаче не упомянуто явно: chunking, manual review, error logging, scheduling, уведомления — НЕ добавляй это',\n  '- Выбирай простейшую архитектуру которая решает задачу — меньше нод лучше чем больше',\n  '- Если нода нужна только для edge case который не указан в задаче — не добавляй её',\n  '',\n  '[СТРУКТУРА]',\n  '- Корень: { name, nodes, connections, settings: {executionOrder:\"v1\"} }',\n  '- Нода: { id (уникальный), name (УНИКАЛЬНОЕ!), type, typeVersion, position:[x,y], parameters }',\n  '- Первая нода всегда триггер',\n  '- Все ноды соединены, нет висящих нод',\n  '- Минимум 4 ноды',\n  '',\n  '[CONNECTIONS]',\n  '- КАЖДАЯ нода из списка nodes обязана быть целевой хотя бы в одном connection (кроме триггера и Sticky Note)',\n  '- Проверь перед выводом: все ли ноды из nodes присутствуют в connections как node-цель',\n  '',\n  '[HTTP REQUEST НОДЫ]',\n  '- ВСЕГДА заполняй: method, url, sendBody:true, specifyBody:\"json\", jsonBody с реальными данными',\n  '- ВСЕГДА добавляй options: { timeout:30000, response:{response:{neverError:true, responseFormat:\"json\"}} }',\n  '- Если нужна авторизация: authentication:\"genericCredentialType\", genericAuthType:\"httpBearerAuth\"',\n  '- НЕ оставляй bodyParameters с пустыми массивами [{}]',\n  '',\n  '[ПОТЕРЯ КОНТЕКСТА]',\n  '- После КАЖДОЙ HTTP Request ноды ОБЯЗАТЕЛЬНО добавляй Code ноду восстанавливающую контекст',\n  \"- Паттерн: const response = $input.first().json; const ctx = $('Имя ноды с контекстом').first().json; return [{ json: { ...ctx, result: response } }];\",\n  '- Никогда не обращайся к $json.поле после HTTP Request если это поле пришло из более ранней ноды',\n  '',\n  '[IF НОДА]',\n  '- main[0] = true ветка → одна нода',\n  '- main[1] = false ветка → ДРУГАЯ нода (никогда не одинаковые!)',\n  '',\n  '[ЗАПРЕЩЕНО]',\n  '- n8n-nodes-base.executeCommand',\n  '- n8n-nodes-base.function',\n  '- .isExecuted, .isActive — этих методов не существует в n8n',\n  '- Пустые parameters: {}',\n  '- Поле credentials внутри нод',\n  '',\n  '[ВМЕСТО ЗАПРЕЩЁННОГО]',\n  '- Вместо function → n8n-nodes-base.code с полем jsCode',\n  '- Вместо executeCommand → n8n-nodes-base.httpRequest',\n  '',\n  '[STICKY NOTE]',\n  '- Добавь одну ноду: { id:\"sticky-1\", name:\"Инструкция\", type:\"n8n-nodes-base.stickyNote\", typeVersion:1, position:[240,-300], parameters:{ color:3, width:700, height:500, content:\"...\" } }',\n  '- В content: 1) Что делает воркфлоу, 2) Какие credentials подключить и к каким нодам, 3) Что настроить вручную, 4) Пример входных данных, 5) Возможные ошибки',\n  '- Sticky Note НЕ добавлять в connections',\n  '',\n  'Верни ТОЛЬКО JSON объект без обёрток'\n].join('\\n');\n\nreturn [{\n  json: {\n    businessTask: $input.first().json.businessTask,\n    failedTemplates: JSON.stringify($input.first().json.failedTemplates || []),\n    exampleWorkflow: JSON.stringify(example, null, 2),\n    ifExample: JSON.stringify(ifExample, null, 2),\n    httpExample: JSON.stringify(httpExample, null, 2),\n    rules: rules\n  }\n}];"
+      },
+      "id": "84fd9dca-b2db-4f88-965a-d34f16b86a87",
+      "name": "Контекст1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1184,
+        -2864
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\n\nconsole.log('Full Claude response:', JSON.stringify(response).substring(0, 500));\n\nif (response.error) {\n  return [{ json: { \n    text: '', \n    error: response.error, \n    businessTask: $('Execute Sub-workflow Trigger').first().json.businessTask \n  }}];\n}\n\n// Claude возвращает content как массив блоков разных типов\n// tool_use блоки = вызовы MCP (нас не интересуют)\n// text блоки = финальный ответ (нас интересует)\nconst content = response.content || [];\nconst textBlock = content.find(b => b.type === 'text');\nlet text = textBlock?.text || '';\n\nif (!text || text.trim() === '') {\n  return [{ json: { \n    text: '', \n    error: { message: 'Claude вернул пустой ответ. stop_reason: ' + response.stop_reason }, \n    businessTask: $('Execute Sub-workflow Trigger').first().json.businessTask \n  }}];\n}\n\n// Claude иногда оборачивает в markdown блок — убираем\ntext = text.replace(/^```json\\s*/i, '').replace(/\\s*```$/, '').trim();\n\n// Проверяем что это JSON и что нод достаточно\ntry {\n  const parsed = JSON.parse(text);\n  if ((parsed.nodes?.length || 0) <= 1) {\n    return [{ json: { \n      text: '', \n      error: { message: 'Воркфлоу содержит только ' + (parsed.nodes?.length || 0) + ' ноду — слишком мало' }, \n      businessTask: $('Execute Sub-workflow Trigger').first().json.businessTask \n    }}];\n  }\n} catch(e) {\n  // не парсится — пускаем дальше, валидация разберётся\n}\n\nreturn [{\n  json: {\n    text: text,\n    businessTask: $('Execute Sub-workflow Trigger').first().json.businessTask\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -16,
+        -2880
+      ],
+      "id": "5ea45c9f-2963-4ed4-8b5d-a1f7e344a754",
+      "name": "Extract1"
+    },
+    {
+      "parameters": {
+        "content": "## Execute Sub-workflow Trigger\n\n**Что делает:** Точка входа — принимает данные от оркестратора.\n\n**Почему:** Builder — это sub-workflow, вызываемый из главного оркестратора через Execute Sub-workflow ноду.\n\n**Inputs:**\n- `businessTask` (string) — описание задачи от пользователя\n- `failedTemplates` (array) — шаблоны из RAG которые не подошли\n\n**Outputs:** Передаёт оба поля дальше в Контекст.",
+        "height": 320,
+        "width": 400,
+        "color": 6
+      },
+      "id": "c5a6baa0-415e-4f12-80b3-046bc6967f12",
+      "name": "📝 Trigger",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -6016,
+        -1760
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Контекст\n\n**Что делает:** Подготавливает промпт — примеры воркфлоу, правила генерации, паттерны API-интеграций.\n\n**Почему:** LLM генерирует качественнее когда получает:\n1. Конкретные примеры JSON-структуры (few-shot)\n2. Чёткие правила (что можно/нельзя)\n3. Паттерны типичных интеграций (Whisper, YouTube, Notion...)\n\n**Outputs:**\n- `businessTask` — задача пользователя\n- `failedTemplates` — что не подошло\n- `exampleWorkflow` — пример JSON воркфлоу\n- `apiPatterns` — паттерны интеграций (Whisper, YouTube Upload, и т.д.)\n- `rules` — правила генерации\n\n**⚠️ Если нужно улучшить качество** — редактируй apiPatterns и rules здесь.",
+        "height": 420,
+        "width": 400,
+        "color": 6
+      },
+      "id": "aa4d42b9-5ad5-4f1b-9044-342a8e96cc13",
+      "name": "📝 Контекст",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -5536,
+        -1792
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Поиск нод (MCP search_nodes)\n\n**Что делает:** HTTP POST к MCP-серверу (Railway) — ищет релевантные ноды n8n по описанию задачи.\n\n**Почему:** Модель не знает все 400+ типов нод n8n. MCP возвращает список подходящих нод с их типами и описаниями.\n\n**Endpoint:** `tools/call` → `search_nodes`\n**Query:** первые 150 символов businessTask\n\n**⚠️ MCP на Railway может заснуть** — настрой keepalive воркфлоу (пинг каждые 10 мин).\n**Retry:** 2 попытки, пауза 5 сек.",
+        "height": 388,
+        "width": 384,
+        "color": 4
+      },
+      "id": "b04c276f-ed38-4bb6-9f6a-ca0861856a8b",
+      "name": "📝 Поиск нод",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -5104,
+        -1760
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Парсинг результатов\n\n**Что делает:** Извлекает список nodeType из ответа MCP и выбирает топ-4 для детального запроса.\n\n**Почему:** MCP search_nodes возвращает обзор, но без подробных параметров. Нам нужны точные имена полей — для этого будем вызывать get_node для каждой ноды.\n\n**Логика:**\n1. Парсит текст ответа MCP\n2. Ищет regex `\"nodeType\": \"n8n-nodes-base.xxx\"`\n3. Убирает триггеры и sticky notes\n4. Берёт максимум 4 уникальных типа\n\n**Outputs:** nodeTypes[], searchSummary + весь контекст из предыдущей ноды.",
+        "height": 408,
+        "width": 400,
+        "color": 4
+      },
+      "id": "2596503e-5957-48c9-9bf5-b228f663486b",
+      "name": "📝 Парсинг",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -4656,
+        -1808
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Get Node Details (MCP get_node)\n\n**Что делает:** Для каждой из топ-4 нод вызывает MCP `get_node` с `detail=full` чтобы получить:\n- Точные имена параметров\n- typeVersion\n- Примеры конфигурации\n\n**Почему:** Это заменяет `mcp_servers` внутри Anthropic API. Раньше Claude сам вызывал MCP через tool_use, тратя 50-80K токенов. Теперь документация приходит готовым текстом — экономия 3-4x по токенам.\n\n**Лимиты:**\n- Каждая нода: до 2000 символов документации\n- Всего: до 10000 символов\n\n**⚠️ Если `fetch` не работает** на n8n Cloud — заменить на цепочку HTTP Request нод (см. builder-fix-guide.md, вариант A).",
+        "height": 448,
+        "width": 420,
+        "color": 4
+      },
+      "id": "52f738ba-70df-4f78-9ccc-ca70189b614b",
+      "name": "📝 Get Node Details",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -4224,
+        -1856
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Генерация (Claude Sonnet 4.6)\n\n**Что делает:** HTTP POST к Anthropic API — генерирует JSON воркфлоу n8n.\n\n**Почему Claude, а не GPT:** Claude лучше следует сложным JSON-инструкциям и реже ломает структуру.\n\n**Ключевые настройки:**\n- model: claude-sonnet-4-6\n- max_tokens: 8000\n- timeout: 180 сек\n- БЕЗ mcp_servers (документация уже в промпте)\n- БЕЗ anthropic-beta header\n\n**Промпт включает:**\n1. businessTask — задача пользователя\n2. nodesDocs — документация нод из MCP\n3. apiPatterns — паттерны интеграций\n4. exampleWorkflow — пример структуры\n5. rules — правила генерации\n\n**Retry:** 2 попытки, 5 сек пауза.",
+        "height": 536,
+        "width": 400
+      },
+      "id": "30a05263-3a3c-4104-a734-8222d77a5431",
+      "name": "📝 Генерация",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -3744,
+        -1936
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Extract\n\n**Что делает:** Извлекает JSON-текст из ответа Claude.\n\n**Почему:** Claude возвращает `{ content: [{ type: \"text\", text: \"...\" }] }`. Нужно достать текст, убрать markdown-обёртки (```json), найти JSON.\n\n**Дополнительные проверки:**\n- Если ответ пустой → ошибка\n- Если нод ≤1 → ошибка (слишком мало)\n- Логирует input/output tokens и stop_reason\n- Предупреждает о нодах с пустыми parameters\n\n**Outputs:** `text` (строка JSON) + `businessTask`.",
+        "height": 320,
+        "width": 380
+      },
+      "id": "833407ab-3a6d-4e04-8c65-5b050af53ab4",
+      "name": "📝 Extract",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -3296,
+        -1744
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Валидация\n\n**Что делает:** Парсит JSON и проверяет структуру воркфлоу.\n\n**Проверки:**\n✓ Наличие name, nodes[], connections\n✓ Уникальность имён нод\n✓ Наличие type, id, position у каждой ноды\n✓ Все ноды в connections существуют\n✓ Нет висящих нод (без входящего connection)\n✓ Есть триггер\n✓ **Нет пустых parameters** (кроме триггеров/sticky)\n✓ **HTTP Request имеет url и method**\n✓ **Code нода имеет jsCode**\n\n**Автофиксы:**\n- Добавляет id если нет\n- Добавляет typeVersion=1 если нет\n- Удаляет credentials\n- Устанавливает settings.executionOrder\n\n**Output:** `{ valid, errors[], workflow, businessTask }`",
+        "height": 460,
+        "width": 400,
+        "color": 2
+      },
+      "id": "7b3de1f0-c546-46d1-8b6d-6fd345a49f81",
+      "name": "📝 Валидация",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -2704,
+        -1872
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Валидно? → True ветка\n\n### Code in JavaScript2 (Очистка)\nУбирает credentials из нод и оставляет только поля которые принимает n8n API: name, nodes, connections, settings.\n\n### Пробная загрузка\nPOST на n8n API `/api/v1/workflows` — создаёт реальный воркфлоу чтобы проверить что API принимает структуру.\n\n### API принял?\nПроверяет что ответ содержит `id` (значит воркфлоу создан).\n\n### Удалить пробный\nDELETE `/api/v1/workflows/{id}` — удаляет тестовый воркфлоу.\n\n### Результат\nФормирует финальный ответ: `{ success: true, workflowJson, workflowName, summary }`\n\n### Ошибка API\nЕсли API не принял — формирует ошибку с деталями.",
+        "height": 420,
+        "width": 500,
+        "color": 2
+      },
+      "id": "b20f820b-fb4f-464d-92af-dae9141291bc",
+      "name": "📝 True ветка",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        320,
+        -2416
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🔧 Builder v2 — Полная документация\n\n### Назначение\nСуб-воркфлоу который принимает текстовое описание задачи (businessTask) и генерирует готовый JSON воркфлоу n8n. Вызывается из главного оркестратора через Execute Sub-workflow.\n\n---\n\n### Архитектура (поток данных)\n```\n1. Trigger (вход: businessTask + failedTemplates)\n2. Контекст (подготовка промпта: примеры, правила, apiPatterns)\n3. Поиск нод — HTTP → MCP search_nodes (какие ноды нужны для задачи)\n4. Парсинг результатов — извлечение nodeType[] из ответа MCP\n5. Get Node Details — HTTP → MCP get_node × 4 (точные параметры нод)\n6. Генерация — HTTP → Anthropic API (Claude Sonnet 4.6 без MCP!)\n7. Extract — извлечение JSON из ответа Claude\n8. Валидация — проверка структуры JSON\n9a. ✅ Valid → Очистка → Пробная загрузка (n8n API) → Удаление → Результат\n9b. ❌ Invalid → Retry (GPT-5.2 исправляет ошибки) → снова Валидация\n```\n\n---\n\n### MCP сервер (n8n-docs)\n**Что это:** Сервер документации нод n8n, задеплоенный на Railway.\n**Репо:** github.com/czlonkowski/n8n-mcp\n**URL:** https://your-service.example.com/mcp\n**Протокол:** JSON-RPC 2.0\n**Авторизация:** Bearer token в заголовке Authorization\n\n**Доступные методы:**\n- `search_nodes` — поиск нод по текстовому запросу, возвращает список nodeType + описания\n- `get_node` — детальная документация конкретной ноды (параметры, typeVersion, примеры)\n  - detail: \"basic\" | \"full\" (full включает примеры конфигурации)\n\n**Как используется в Builder:**\nРаньше (v1): mcp_servers передавался ВНУТРИ Anthropic API → Claude сам вызывал MCP через tool_use → 5-6 round-trips → 60-80K токенов → rate limit.\nТеперь (v2): MCP вызывается ОТДЕЛЬНЫМИ HTTP Request нодами ДО генерации → документация приходит как текст в промпте → 15-25K токенов → нет rate limit.\n\n**⚠️ Railway free tier:** Контейнер засыпает через ~15 мин. Решение: keepalive воркфлоу (пинг каждые 10 мин).\n\n---\n\n### Модели\n| Этап | Модель | Почему |\n|------|--------|--------|\n| Генерация | Claude Sonnet 4.6 | Лучше следует JSON-инструкциям, стабильная структура |\n| Исправление | GPT-5.2 | Дешевле и быстрее, задача простая (фикс по списку ошибок) |\n| Роутер (оркестратор) | GPT-5-mini | Лёгкая задача маршрутизации |\n\n### Ключевые лимиты\n- Anthropic rate limit: 80K input tokens/мин (Sonnet 4.6)\n- MCP timeout: 30 сек на запрос\n- n8n API: принимает только name, nodes, connections, settings\n- Генерация timeout: 180 сек\n- Max retry: 2 попытки исправления\n\n### Credentials в воркфлоу\n- Anthropic API key → заголовок x-api-key в ноде Генерация\n- MCP Bearer token → заголовок Authorization в нодах Поиск нод, Get Node Details\n- n8n API key → httpHeaderAuth в нодах Пробная загрузка, Удалить пробный\n- OpenAI API key → httpBearerAuth в ноде Исправление\n\n### Промпт (что получает Claude)\n1. businessTask — задача пользователя\n2. failedTemplates — шаблоны которые не подошли (из RAG)\n3. nodesDocs — документация нод из MCP (до 10K символов)\n4. apiPatterns — паттерны типичных интеграций (Whisper, YouTube, Notion...)\n5. exampleWorkflow — пример JSON-структуры (few-shot)\n6. rules — правила генерации (структура, connections, запреты)\n\n### Качество генерации (текущее)\n- Простые воркфлоу (Webhook→Sheets→Telegram): ~95% готовы к использованию\n- Средние (YouTube→Whisper→Notion): ~75% — нужна проверка API-специфики\n- Сложные (Video Gen→YouTube Upload): ~60% — нужна ручная доработка\n- Структура JSON: стабильно валидная\n- Пустые parameters: почти устранены\n- Sticky Note: всегда генерируется с подробной инструкцией",
+        "height": 1700,
+        "width": 880,
+        "color": 5
+      },
+      "id": "11313ba1-d200-4159-97a1-0fd29094e2db",
+      "name": "📋 Builder v2 — Документация",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -6080,
+        -3632
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🚀 Roadmap — что можно улучшить\n\n---\n\n### 🔴 Большие улучшения \n\n**8. Custom RAG по API-документациям**\nСобрать документацию топ-30 сервисов (OpenAI, YouTube API, Telegram Bot API, Notion, Google APIs, D-ID, Stripe, Slack...). Chunking → Embedding → Vector DB. При генерации — semantic search по задаче → релевантные куски документации в промпт.\nЭффект: +20-25% качества для сложных интеграций.\nТрудозатраты: 2-4 недели.\n\n**9. Feedback loop (обучение на ошибках)**\nКогда пользователь вручную исправляет воркфлоу — сохранять пару (оригинал, исправление). Со временем накопится датасет типичных ошибок. Можно использовать как:\n- Дополнительные примеры в промпте\n- Fine-tuning dataset\n- Автоматические пост-фиксы\n\n**10. Multi-model pipeline**\nИспользовать разные модели для разных этапов:\n- Планирование: Claude Opus (лучше рассуждает)\n- Генерация JSON: Claude Sonnet (быстрее, дешевле)\n- Валидация логики: отдельный LLM-вызов «проверь что этот воркфлоу делает то что просил пользователь»\n\n**11. Визуальное превью**\nПосле генерации — создать изображение графа воркфлоу (через n8n Canvas API или Mermaid diagram) и отправить пользователю вместе с JSON. Пользователь видит структуру до импорта.\n\n---\n\n### ⛔ Не стоит делать\n\n**Переделывать MCP в RAG** — одно и то же содержимое, разный транспорт. Ноль прироста качества.\n\n**Подключать сторонние MCP** с API-документациями — таких нет в готовом виде, делать самому = тот же RAG.\n\n**Гнаться за 100% автоматизацией** — закон убывающей отдачи. Текущие 70-85% уже экономят пользователю 80% времени. Последние 15% будут стоить в 10 раз дороже.\n\n**Fine-tuning модели** — слишком мало данных, дорого, хрупко. Промпт-инжиниринг + RAG дают сравнимый результат проще.",
+        "height": 1700,
+        "width": 700,
+        "color": 3
+      },
+      "id": "4fe56f64-c1f9-4af5-a3be-4f2166ef910f",
+      "name": "🚀 Roadmap",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -5136,
+        -3632
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://your-service.example.com/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "<AUTHORIZATION>"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"search_nodes\",\n    \"arguments\": {\n      \"query\": $json.nodeSearchQuery,\n      \"includeExamples\": true\n    }\n  },\n  \"id\": 1\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -5968,
+        208
+      ],
+      "id": "15694b69-8864-4d3e-859d-38ff1e5f186d",
+      "name": "MCP: Поиск нод",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://your-service.example.com/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "<AUTHORIZATION>"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"get_node\",\n    \"arguments\": {\n      \"nodeType\": ($json.nodeTypes && $json.nodeTypes[0]) || 'n8n-nodes-base.httpRequest',\n      \"detail\": \"full\"\n    }\n  },\n  \"id\": 10\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -5168,
+        208
+      ],
+      "id": "062d66ef-7070-4302-a192-8553280caf01",
+      "name": "MCP: Get Node 1",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://your-service.example.com/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "<AUTHORIZATION>"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"get_node\",\n    \"arguments\": {\n      \"nodeType\": $json.nextNodeType || 'n8n-nodes-base.set',\n      \"detail\": \"full\"\n    }\n  },\n  \"id\": 11\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -4368,
+        208
+      ],
+      "id": "f2f010c5-efcd-425b-90a6-89e4524fcaa8",
+      "name": "MCP: Get Node 2",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://your-service.example.com/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"search_api\",\n    \"arguments\": {\n      \"query\": ($json.apiSearchQueriesAll || [$json.apiSearchQuery]).join(' ')\n    }\n  },\n  \"id\": 20\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -3568,
+        208
+      ],
+      "id": "91fa5185-be51-46ce-b4f8-712ecc650f8e",
+      "name": "MCP: Поиск API",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://your-service.example.com/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"get_api_docs\",\n    \"arguments\": {\n      \"service_name\": $json.apiServiceFound || 'http'\n    }\n  },\n  \"id\": 21\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -2768,
+        208
+      ],
+      "id": "d1126c8f-4c4f-4fe8-8bd5-82699571c133",
+      "name": "MCP: Get API Docs",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst ctx = $('Парсинг API search1').first().json;\n\n// Парсим ответ от MCP: Get API Docs\nlet mcpData = null;\nconst rawText = typeof raw === 'string' ? raw : (raw.data || raw.body || JSON.stringify(raw));\n\nif (typeof raw === 'object' && raw.result) {\n  mcpData = raw;\n} else {\n  const lines = String(rawText).split('\\n');\n  for (const line of lines) {\n    const trimmed = line.trim();\n    if (trimmed.startsWith('data: ')) {\n      try { mcpData = JSON.parse(trimmed.substring(6)); break; } catch(e) {}\n    }\n  }\n  if (!mcpData) {\n    try { mcpData = JSON.parse(String(rawText)); } catch(e) {}\n  }\n}\n\nlet apiDocsText = '';\nif (mcpData?.result?.content) {\n  const content = mcpData.result.content;\n  if (Array.isArray(content)) apiDocsText = content.map(c => c.text || '').join('\\n');\n  else if (typeof content === 'string') apiDocsText = content;\n}\n\n// ═══════════════════════════════════════════\n// СПРАВОЧНИК API (fallback если MCP не нашёл)\n// ═══════════════════════════════════════════\n\nconst knownApis = {\n\nvk: `# VK API — Полная документация для n8n\nBase URL: https://api.vk.com/method/\nВАЖНО: VK принимает запросы через GET с query params. access_token передаётся как query param.\n\n## ТОКЕНЫ — ДВА РАЗНЫХ ТОКЕНА\n- VK_GROUP_TOKEN: токен сообщества (бот-токен или токен созданный через Manage → API Usage)\n  Права: wall, stories, offline\n  Используется для: wall.post от имени группы (from_group=1), stories.getPhotoUploadServer с group_id\n- VK_USER_TOKEN: токен пользователя (получить через VK OAuth с scope=wall,stories,offline)\n  Используется для: wall.post на личную стену, stories.getPhotoUploadServer без group_id\n\n## wall.post — публикация на стене\nGET https://api.vk.com/method/wall.post\nQuery params:\n  owner_id: для группы = \"-\" + GROUP_ID (отрицательное), для юзера = USER_ID (положительное)\n  message: текст поста (URL-encoded)\n  from_group: 1 (только для групп, публикация от имени группы)\n  access_token: VK_GROUP_TOKEN для группы, VK_USER_TOKEN для личной\n  v: 5.199\nResponse: { \"response\": { \"post_id\": 123 } }\nОшибки: 15 = нет прав, 214 = стена закрыта\n\n## wall.post для личной страницы\nGET https://api.vk.com/method/wall.post\nQuery params:\n  owner_id: USER_ID (положительное число)\n  message: текст поста\n  access_token: VK_USER_TOKEN (токен пользователя)\n  v: 5.199\n\n## stories.getPhotoUploadServer — фото-сторис\nДля группы:\n  GET https://api.vk.com/method/stories.getPhotoUploadServer?group_id=GROUP_ID&add_to_news=1&access_token=VK_GROUP_TOKEN&v=5.199\nДля личной страницы (без group_id):\n  GET https://api.vk.com/method/stories.getPhotoUploadServer?add_to_news=1&access_token=VK_USER_TOKEN&v=5.199\nResponse: { \"response\": { \"upload_url\": \"https://pu.vk.com/...\" } }\n\n## stories.getVideoUploadServer — видео-сторис\nАналогично getPhotoUploadServer, но метод stories.getVideoUploadServer\n\n## Загрузка медиа (2 шага):\nШаг 1: GET stories.getPhotoUploadServer → upload_url\nШаг 2: POST на upload_url с multipart/form-data, поле \"file\" = бинарный файл\nВ n8n: contentType: \"multipart-form-data\", bodyParameters: [{ parameterType: \"formBinaryData\", name: \"file\", inputDataFieldName: \"data\" }]\nResponse: JSON с upload_result\n\n## Лимиты\n- wall.post message: макс 16384 символа\n- Сторис фото: JPEG/PNG, макс 10MB\n- Сторис видео: MP4, макс 30 секунд`,\n\ntelegram: `# Telegram Bot API — Полная документация для n8n\nBase URL: https://api.telegram.org/bot{TOKEN}/\nТокен передаётся В URL-пути, НЕ в заголовке, НЕ в body.\n\n## sendMessage — текст\nPOST https://api.telegram.org/bot{TOKEN}/sendMessage\nBody (JSON): { chat_id, text, parse_mode: \"HTML\" (опционально) }\nResponse: { ok: true, result: { message_id: 123 } }\nЛимит: 4096 символов\n\n## sendPhoto\nPOST .../sendPhoto, Body: { chat_id, photo: file_id или URL, caption (макс 1024) }\n\n## sendVideo\nPOST .../sendVideo, Body: { chat_id, video: file_id или URL, caption }\n\n## getFile — путь к файлу\nGET https://api.telegram.org/bot{TOKEN}/getFile?file_id=XXX\nResponse: { result: { file_path: \"photos/file_123.jpg\" } }\nСкачать: GET https://api.telegram.org/file/bot{TOKEN}/{file_path}\n\n## Telegram Trigger в n8n\nНода n8n-nodes-base.telegramTrigger, typeVersion: 1.1, parameters: { updates: [\"message\"] }\nПолучает объект:\n  message.from.id — ID отправителя\n  message.chat.id — ID чата (= from.id для личного)\n  message.text — текст\n  message.photo — массив (последний = лучшее качество): photo[photo.length-1].file_id\n  message.video.file_id — ID видео\n  message.document.file_id — ID документа\n\n## ВАЖНО для n8n\n- Бот должен быть админом канала для публикации\n- chat_id канала: @username или -100xxxxxxxxxx\n- Для двухшагового диалога используй $getWorkflowStaticData(\"global\")`,\n\nopenai: `# OpenAI API\n## Chat Completions\nPOST https://api.openai.com/v1/chat/completions\nHeaders: Authorization: Bearer sk-...\nBody: { \"model\": \"gpt-4o-mini\", \"messages\": [{\"role\":\"system\",\"content\":\"...\"}, {\"role\":\"user\",\"content\":\"...\"}], \"max_tokens\": 1500 }\nResponse: choices[0].message.content\n\n## Для n8n\nsendHeaders: true, headerParameters: [{ name: \"Authorization\", value: \"=Bearer {{ $json.cfg.OPENAI_API_KEY }}\" }]\nИли: authentication: \"genericCredentialType\", genericAuthType: \"httpBearerAuth\"\n\n## Images\nPOST https://api.openai.com/v1/images/generations\nBody: { \"model\": \"dall-e-3\", \"prompt\": \"...\", \"n\": 1, \"size\": \"1024x1024\" }\nResponse: data[0].url`,\n\ngemini: `# Gemini Image API\nPOST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key={API_KEY}\nBody: { \"contents\": [{\"parts\":[{\"text\":\"PROMPT\"}]}], \"generationConfig\": {\"responseModalities\":[\"TEXT\",\"IMAGE\"]} }\nResponse: candidates[0].content.parts[] — изображение: part.inlineData.data (base64)`,\n\nstripe: `# Stripe API\nBase URL: https://api.stripe.com/v1\nAuth: Bearer sk_...\nCharges: POST /charges, body: amount(cents), currency, source`,\n\nnotion: `# Notion API\nBase URL: https://api.notion.com/v1\nAuth: Bearer token, Header: Notion-Version: 2022-06-28\nPages: POST /pages, Databases: GET /databases/{id}/query`,\n\n};\n\n// Алиасы\nconst aliases = {\n  'nano-banana': 'gemini', 'nanbanana': 'gemini', 'imagen': 'gemini',\n  'gpt': 'openai', 'chatgpt': 'openai', 'dall-e': 'openai', 'dalle': 'openai',\n  'вк': 'vk', 'вконтакте': 'vk', 'vkontakte': 'vk',\n  'тг': 'telegram', 'tg': 'telegram', 'тelegram': 'telegram',\n};\n\n// Для каждого сервиса — проверяем есть ли он в MCP, если нет — добавляем из knownApis\nconst allServices = ctx.apiSearchQueriesAll || [];\nconst extraDocs = [];\nconst mcpLower = apiDocsText.toLowerCase();\n\nfor (let service of allServices) {\n  service = service.toLowerCase();\n  const resolvedKey = aliases[service] || service;\n  const isCoveredByMcp = mcpLower.includes(service) || mcpLower.includes(resolvedKey);\n  if (!isCoveredByMcp && knownApis[resolvedKey]) {\n    extraDocs.push(`# [Fallback] ${resolvedKey}\\n` + knownApis[resolvedKey]);\n  }\n}\n\nconst combinedApiDocs = [apiDocsText, ...extraDocs]\n  .filter(Boolean)\n  .join('\\n\\n---\\n\\n')\n  .substring(0, 18000);\n\nreturn [{\n  json: {\n    businessTask: ctx.businessTask,\n    failedTemplates: ctx.failedTemplates,\n    exampleWorkflow: ctx.exampleWorkflow,\n    apiPatterns: ctx.apiPatterns,\n    rules: ctx.rules,\n    nodesDocs: ctx.nodesDocs,\n    apiDocs: combinedApiDocs\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2368,
+        208
+      ],
+      "id": "d3b391d7-161c-4b81-9ff8-c26bfe3436fb",
+      "name": "Подготовить всё"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst wf = item.workflow;\nconst cleanWorkflow = {\n  name: wf.name || 'Generated Workflow',\n  nodes: (wf.nodes || []).map(({ credentials, ...n }) => n),\n  connections: wf.connections || {},\n  settings: wf.settings || { executionOrder: 'v1' }\n};\nreturn [{ json: { workflow: cleanWorkflow, businessTask: item.businessTask } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        -128
+      ],
+      "id": "81204f16-7692-4415-9d98-b2fe180bea6a",
+      "name": "Clean Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst text = response.choices?.[0]?.message?.content || '';\nreturn [{ json: { text, businessTask: $('Execute Sub-workflow Trigger').first().json.businessTask } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        784
+      ],
+      "id": "e9fa9b78-a9d9-4974-81d2-5da755d38464",
+      "name": "Extract Fix"
+    },
+    {
+      "parameters": {
+        "jsCode": "const task = ($input.first().json.businessTask || '').toLowerCase();\n\n// ═══════════════════════════════════════════════════════════════\n// ЭТАЛОННЫЕ ПРИМЕРЫ ПО ТИПУ ЗАДАЧИ\n// ═══════════════════════════════════════════════════════════════\n\nlet example;\n\nif (task.includes('telegram') || task.includes('тг') || task.includes('телеграм') || task.includes('бот')) {\n  // ─── TELEGRAM BOT с двухшаговым диалогом ───\n  example = {\n    name: \"Telegram Bot with State Management\",\n    nodes: [\n      {\n        id: \"tg-trigger\", name: \"Telegram Trigger\",\n        type: \"n8n-nodes-base.telegramTrigger\", typeVersion: 1.1,\n        position: [250, 300],\n        parameters: { updates: [\"message\"], additionalFields: {} }\n      },\n      {\n        id: \"router-1\", name: \"Router + Config\",\n        type: \"n8n-nodes-base.code\", typeVersion: 2,\n        position: [470, 300],\n        parameters: {\n          mode: \"runOnceForEachItem\",\n          jsCode: \"const cfg = {\\n  TG_BOT_TOKEN: 'PASTE_TOKEN',\\n  ALLOWED_CHAT_IDS: [],\\n  TG_CHANNEL_CHAT_ID: '@channel',\\n  VK_GROUP_ID: '123',\\n  VK_USER_ID: '456',\\n  VK_GROUP_TOKEN: 'PASTE',\\n  VK_USER_TOKEN: 'PASTE',\\n  VK_API_VERSION: '5.199'\\n};\\nconst staticData = $getWorkflowStaticData('global');\\nconst msg = $json.message || {};\\nconst chatId = msg.chat?.id;\\nconst text = (msg.text || '').trim();\\nconst lower = text.toLowerCase();\\nif (!chatId) return [{ json: { action: 'ignore', chatId: 0, cfg } }];\\nif (cfg.ALLOWED_CHAT_IDS.length && !cfg.ALLOWED_CHAT_IDS.includes(chatId)) return [{ json: { action: 'unauthorized', chatId, cfg } }];\\nconst stateKey = 's_' + chatId;\\nconst state = staticData[stateKey] || {};\\nlet action = 'unsupported';\\nif (lower === 'отмена' || lower === '/cancel') {\\n  delete staticData[stateKey];\\n  return [{ json: { action: 'cancelled', chatId, cfg } }];\\n}\\nif (lower === 'выложи пост') {\\n  staticData[stateKey] = { awaiting: 'post_text' };\\n  action = 'ask_post';\\n} else if (state.awaiting === 'post_text' && text) {\\n  delete staticData[stateKey];\\n  action = 'process_post';\\n}\\nreturn [{ json: { action, chatId, text, cfg } }];\"\n        }\n      },\n      {\n        id: \"switch-1\", name: \"Action Switch\",\n        type: \"n8n-nodes-base.switch\", typeVersion: 3.2,\n        position: [690, 300],\n        parameters: {\n          mode: \"expression\",\n          numberOutputs: 4,\n          output: \"={{ ({ ask_post: 0, process_post: 1, unauthorized: 2 })[$json.action] ?? 3 }}\"\n        }\n      },\n      {\n        id: \"http-ask\", name: \"Reply Ask Post\",\n        type: \"n8n-nodes-base.httpRequest\", typeVersion: 4.2,\n        position: [910, 200],\n        parameters: {\n          method: \"POST\",\n          url: \"=https://api.telegram.org/bot{{ $json.cfg.TG_BOT_TOKEN }}/sendMessage\",\n          sendBody: true, specifyBody: \"json\",\n          jsonBody: \"={{ JSON.stringify({ chat_id: $json.chatId, text: 'Отправьте текст поста:' }) }}\",\n          options: { timeout: 15000, response: { response: { neverError: true, responseFormat: \"json\" } } }\n        }\n      },\n      {\n        id: \"http-publish\", name: \"Publish To Channel\",\n        type: \"n8n-nodes-base.httpRequest\", typeVersion: 4.2,\n        position: [910, 350],\n        parameters: {\n          method: \"POST\",\n          url: \"=https://api.telegram.org/bot{{ $json.cfg.TG_BOT_TOKEN }}/sendMessage\",\n          sendBody: true, specifyBody: \"json\",\n          jsonBody: \"={{ JSON.stringify({ chat_id: $json.cfg.TG_CHANNEL_CHAT_ID, text: $json.text }) }}\",\n          options: { timeout: 30000, response: { response: { neverError: true, responseFormat: \"json\" } } }\n        }\n      },\n      {\n        id: \"code-restore\", name: \"Restore After Publish\",\n        type: \"n8n-nodes-base.code\", typeVersion: 2,\n        position: [1130, 350],\n        parameters: { jsCode: \"const response = $input.first().json;\\nconst ctx = $('Router + Config').first().json;\\nreturn [{ json: { ...ctx, publishResult: response } }];\" }\n      },\n      {\n        id: \"http-notify\", name: \"Notify Done\",\n        type: \"n8n-nodes-base.httpRequest\", typeVersion: 4.2,\n        position: [1350, 350],\n        parameters: {\n          method: \"POST\",\n          url: \"=https://api.telegram.org/bot{{ $json.cfg.TG_BOT_TOKEN }}/sendMessage\",\n          sendBody: true, specifyBody: \"json\",\n          jsonBody: \"={{ JSON.stringify({ chat_id: $json.chatId, text: '✅ Опубликовано!' }) }}\",\n          options: { timeout: 15000, response: { response: { neverError: true, responseFormat: \"json\" } } }\n        }\n      },\n      {\n        id: \"sticky-1\", name: \"Инструкция\",\n        type: \"n8n-nodes-base.stickyNote\", typeVersion: 1,\n        position: [240, -300],\n        parameters: {\n          color: 3, width: 700, height: 400,\n          content: \"## Telegram Bot\\n\\n### Credentials\\n- TG_BOT_TOKEN: токен от @BotFather\\n\\n### Важно\\n- Router + Config использует $getWorkflowStaticData для двухшагового диалога\\n- Switch роутит по полю action, НЕ по тексту сообщения\\n- После каждого HTTP Request — Code нода для восстановления контекста\\n- Публикация последовательная: TG → VK Group → VK User → Notify\"\n        }\n      }\n    ],\n    connections: {\n      \"Telegram Trigger\": { main: [[{ node: \"Router + Config\", type: \"main\", index: 0 }]] },\n      \"Router + Config\": { main: [[{ node: \"Action Switch\", type: \"main\", index: 0 }]] },\n      \"Action Switch\": { main: [\n        [{ node: \"Reply Ask Post\", type: \"main\", index: 0 }],\n        [{ node: \"Publish To Channel\", type: \"main\", index: 0 }],\n        [{ node: \"Notify Done\", type: \"main\", index: 0 }],\n        [{ node: \"Notify Done\", type: \"main\", index: 0 }]\n      ]},\n      \"Publish To Channel\": { main: [[{ node: \"Restore After Publish\", type: \"main\", index: 0 }]] },\n      \"Restore After Publish\": { main: [[{ node: \"Notify Done\", type: \"main\", index: 0 }]] }\n    },\n    settings: { executionOrder: \"v1\" }\n  };\n} else if (task.includes('schedule') || task.includes('расписани') || task.includes('каждый') || task.includes('cron') || task.includes('автомат')) {\n  example = {\n    name: \"Scheduled API Task\",\n    nodes: [\n      { id: \"sched-1\", name: \"Schedule Trigger\", type: \"n8n-nodes-base.scheduleTrigger\", typeVersion: 1.2,\n        position: [250, 300], parameters: { rule: { interval: [{ field: \"hours\", hoursInterval: 1 }] } } },\n      { id: \"http-1\", name: \"Fetch Data\", type: \"n8n-nodes-base.httpRequest\", typeVersion: 4.2,\n        position: [470, 300], parameters: { method: \"GET\", url: \"https://api.example.com/data\", options: { timeout: 30000, response: { response: { neverError: true, responseFormat: \"json\" } } } } },\n      { id: \"code-1\", name: \"Process Data\", type: \"n8n-nodes-base.code\", typeVersion: 2,\n        position: [690, 300], parameters: { jsCode: \"const data = $input.first().json;\\nreturn [{ json: { processed: data, timestamp: new Date().toISOString() } }];\" } },\n      { id: \"http-2\", name: \"Send Notification\", type: \"n8n-nodes-base.httpRequest\", typeVersion: 4.2,\n        position: [910, 300], parameters: { method: \"POST\", url: \"=https://api.telegram.org/bot{{$env.BOT_TOKEN}}/sendMessage\", sendBody: true, specifyBody: \"json\", jsonBody: \"={{ JSON.stringify({ chat_id: $env.CHAT_ID, text: 'Обновление: ' + JSON.stringify($json.processed).substring(0, 500) }) }}\", options: { timeout: 30000, response: { response: { neverError: true, responseFormat: \"json\" } } } } },\n      { id: \"sticky-1\", name: \"Инструкция\", type: \"n8n-nodes-base.stickyNote\", typeVersion: 1,\n        position: [240, -200], parameters: { color: 3, width: 600, height: 350, content: \"## Scheduled Task\\n\\n### Credentials\\n- BOT_TOKEN: токен Telegram\\n- CHAT_ID: ID чата для уведомлений\\n\\n### Настройка\\n- Изменить интервал в Schedule Trigger\\n- Указать endpoint в Fetch Data\" } }\n    ],\n    connections: {\n      \"Schedule Trigger\": { main: [[{ node: \"Fetch Data\", type: \"main\", index: 0 }]] },\n      \"Fetch Data\": { main: [[{ node: \"Process Data\", type: \"main\", index: 0 }]] },\n      \"Process Data\": { main: [[{ node: \"Send Notification\", type: \"main\", index: 0 }]] }\n    },\n    settings: { executionOrder: \"v1\" }\n  };\n} else if (task.includes('webhook') || task.includes('form') || task.includes('форм') || task.includes('заявк')) {\n  example = {\n    name: \"Webhook to Google Sheets\",\n    nodes: [\n      { id: \"wh-1\", name: \"Webhook\", type: \"n8n-nodes-base.webhook\", typeVersion: 2,\n        position: [250, 300], parameters: { httpMethod: \"POST\", path: \"my-hook\", responseMode: \"lastNode\", options: {} } },\n      { id: \"set-1\", name: \"Prepare Data\", type: \"n8n-nodes-base.set\", typeVersion: 3.4,\n        position: [450, 300], parameters: { mode: \"manual\", assignments: { assignments: [\n          { id: \"f1\", name: \"name\", value: \"={{ $json.body.name }}\", type: \"string\" },\n          { id: \"f2\", name: \"email\", value: \"={{ $json.body.email }}\", type: \"string\" }\n        ] }, options: {} } },\n      { id: \"gs-1\", name: \"Google Sheets\", type: \"n8n-nodes-base.googleSheets\", typeVersion: 4.5,\n        position: [650, 300], parameters: { operation: \"appendOrUpdate\", documentId: { __rl: true, mode: \"id\", value: \"\" }, sheetName: { __rl: true, mode: \"name\", value: \"Sheet1\" }, columns: { mappingMode: \"autoMapInputData\" }, options: {} } },\n      { id: \"sticky-1\", name: \"Инструкция\", type: \"n8n-nodes-base.stickyNote\", typeVersion: 1,\n        position: [240, -300], parameters: { color: 3, width: 700, height: 500, content: \"## Webhook → Sheets\\n\\n### Credentials\\n- Google Sheets: подключить OAuth2\\n\\n### Настройка\\n- Указать documentId таблицы\\n- Первая строка = заголовки: name, email\" } }\n    ],\n    connections: {\n      \"Webhook\": { main: [[{ node: \"Prepare Data\", type: \"main\", index: 0 }]] },\n      \"Prepare Data\": { main: [[{ node: \"Google Sheets\", type: \"main\", index: 0 }]] }\n    },\n    settings: { executionOrder: \"v1\" }\n  };\n} else {\n  example = {\n    name: \"HTTP API Integration\",\n    nodes: [\n      { id: \"wh-1\", name: \"Webhook\", type: \"n8n-nodes-base.webhook\", typeVersion: 2,\n        position: [250, 300], parameters: { httpMethod: \"POST\", path: \"trigger\", responseMode: \"lastNode\", options: {} } },\n      { id: \"code-1\", name: \"Prepare Request\", type: \"n8n-nodes-base.code\", typeVersion: 2,\n        position: [470, 300], parameters: { jsCode: \"const input = $input.first().json;\\nreturn [{ json: { payload: input.body, timestamp: new Date().toISOString() } }];\" } },\n      { id: \"http-1\", name: \"Call API\", type: \"n8n-nodes-base.httpRequest\", typeVersion: 4.2,\n        position: [690, 300], parameters: { method: \"POST\", url: \"https://api.example.com/endpoint\", authentication: \"genericCredentialType\", genericAuthType: \"httpBearerAuth\", sendBody: true, specifyBody: \"json\", jsonBody: \"={{ JSON.stringify({ data: $json.payload }) }}\", options: { timeout: 30000, response: { response: { neverError: true, responseFormat: \"json\" } } } } },\n      { id: \"code-2\", name: \"Restore Context\", type: \"n8n-nodes-base.code\", typeVersion: 2,\n        position: [910, 300], parameters: { jsCode: \"const response = $input.first().json;\\nconst ctx = $('Prepare Request').first().json;\\nreturn [{ json: { ...ctx, result: response } }];\" } },\n      { id: \"sticky-1\", name: \"Инструкция\", type: \"n8n-nodes-base.stickyNote\", typeVersion: 1,\n        position: [240, -200], parameters: { color: 3, width: 600, height: 400, content: \"## API Integration\\n\\n### Credentials\\n- Bearer token в credentials\\n\\n### Важно\\n- После каждого HTTP Request — Code нода для восстановления контекста\" } }\n    ],\n    connections: {\n      \"Webhook\": { main: [[{ node: \"Prepare Request\", type: \"main\", index: 0 }]] },\n      \"Prepare Request\": { main: [[{ node: \"Call API\", type: \"main\", index: 0 }]] },\n      \"Call API\": { main: [[{ node: \"Restore Context\", type: \"main\", index: 0 }]] }\n    },\n    settings: { executionOrder: \"v1\" }\n  };\n}\n\n// ═══════════════════════════════════════════════════════════════\n// ПАТТЕРНЫ ИНТЕГРАЦИЙ\n// ═══════════════════════════════════════════════════════════════\n\nconst apiPatterns = [\n  '=== ПАТТЕРНЫ ИНТЕГРАЦИЙ (КРИТИЧНО — следуй этим правилам!) ===',\n  '',\n  '[TELEGRAM BOT — ДВУХШАГОВЫЙ ДИАЛОГ (САМОЕ ВАЖНОЕ)]',\n  '- Если бот ждёт ответ от пользователя (текст, фото, видео) после команды — ОБЯЗАТЕЛЬНО используй $getWorkflowStaticData(\"global\")',\n  '- Паттерн: ОДНА нода \"Router + Config\" (type: code) содержит:',\n  '  1) Объект cfg со всеми настройками (токены, ID)',\n  '  2) const staticData = $getWorkflowStaticData(\"global\");',\n  '  3) const state = staticData[\"s_\" + chatId] || {};',\n  '  4) Логика: если команда → записать ожидание: staticData[\"s_\"+chatId] = { awaiting: \"тип\" };',\n  '  5) Если state.awaiting совпадает и есть данные → delete staticData[\"s_\"+chatId]; action = \"process_xxx\";',\n  '  6) return [{ json: { action, chatId, text, cfg, ...доп.данные } }];',\n  '- За Router ВСЕГДА идёт Switch нода с mode:\"expression\" которая роутит по $json.action',\n  '- Switch output mapping: { ask_post: 0, ask_story: 1, process_post: 2, process_story: 3, unauthorized: 4, cancelled: 5 }[$json.action] ?? 6',\n  '- НИКОГДА не роуть по содержимому сообщения в Switch — только по action из Router',\n  '- ВСЕГДА обрабатывай команду отмены: \"отмена\" и \"/cancel\" → delete staticData[stateKey]',\n  '- ВСЕГДА проверяй ALLOWED_CHAT_IDS для авторизации',\n  '- ВСЕГДА добавляй ответ \"Неизвестная команда\" для unsupported action',\n  '',\n  '[TELEGRAM BOT — МЕДИА (ФОТО/ВИДЕО)]',\n  '- Фото: msg.photo — массив, бери последний элемент (лучшее качество): msg.photo[msg.photo.length-1].file_id',\n  '- Видео: msg.video.file_id',\n  '- Документ: msg.document.file_id',\n  '- Определяй mediaType: photo/video/document для выбора правильного VK метода',\n  '- В state.awaiting для сторис проверяй наличие медиа, а не текста',\n  '',\n  '[ПАРАЛЛЕЛЬНЫЕ ВЕТКИ — ЗАПРЕЩЕНО ДЛЯ УВЕДОМЛЕНИЙ]',\n  '- Если после параллельных веток стоит ОДНА общая нода (например Notify Done) — она сработает ДВАЖДЫ',\n  '- ПРАВИЛО: если результат всех веток сходится в одно уведомление — делай ПОСЛЕДОВАТЕЛЬНУЮ цепочку:',\n  '  Правильно: API_1 → Restore → API_2 → Restore → API_3 → Restore → Notify',\n  '  Неправильно: Restore → [API_1, API_2] → Notify (Notify сработает 2 раза)',\n  '- Параллельные ветки допустимы ТОЛЬКО если у каждой своя конечная нода',\n  '- Для публикации в несколько соцсетей: TG Channel → Restore → VK Group → Restore → VK User → Restore → Notify (ПОСЛЕДОВАТЕЛЬНО)',\n  '',\n  '[MERGE ПОСЛЕ IF/SWITCH — ПРАВИЛЬНЫЙ ПАТТЕРН]',\n  '- Когда две ветки (например AI и No AI) должны сойтись в одну — НЕ используй try/catch с $(\"Node\").first()',\n  '- $(\"NodeName\").first() ВЫБРОСИТ ОШИБКУ если нода не выполнялась в текущем запуске',\n  '- ПРАВИЛЬНО: обе ветки подключай напрямую к следующей ноде через connections:',\n  '  \"Branch A\": { main: [[{ node: \"Next Step\" }]] },',\n  '  \"Branch B\": { main: [[{ node: \"Next Step\" }]] }',\n  '- n8n автоматически возьмёт данные из той ветки которая сработала',\n  '- НЕ НУЖНА отдельная Merge нода — просто два connection к одной целевой ноде',\n  '- ЗАПРЕЩЕНО: try { ctx = $(\"A\").first().json } catch { ctx = $(\"B\").first().json }',\n  '',\n  '[BINARY FILES В N8N — КРИТИЧНО]',\n  '- После скачивания файла (responseFormat: \"file\") данные попадают в item.binary',\n  '- Для передачи binary через Code ноду ОБЯЗАТЕЛЬНО:',\n  '  const item = $input.first();',\n  '  const ctx = $(\"ИмяНоды\").first().json;',\n  '  return [{ json: { ...ctx }, binary: item.binary }];',\n  '- При upload (multipart-form-data): parameterType: \"formBinaryData\", inputDataFieldName: \"data\"',\n  '- НЕЛЬЗЯ делать параллельные ветки с одним binary — данные потеряются',\n  '- Делай ПОСЛЕДОВАТЕЛЬНО: скачать → upload group → получить URL user → upload user',\n  '- Для повторного upload того же файла: бери binary из ноды где скачивал: $(\"Download\").first().binary',\n  '',\n  '[VK API — КРИТИЧНО]',\n  '- VK принимает запросы через GET с query params, НЕ через POST+JSON body',\n  '- Для публикации в группе: owner_id = \"-\" + GROUP_ID (строка с минусом)',\n  '- Для публикации на личной странице: owner_id = USER_ID (положительное число)',\n  '- VK использует ДВА РАЗНЫХ токена:',\n  '  * VK_GROUP_TOKEN — для публикации от имени группы (wall.post с from_group=1, stories в группу)',\n  '  * VK_USER_TOKEN — для публикации на личной стене и в личные сторис',\n  '- Для сторис группы: stories.getPhotoUploadServer с group_id (без минуса) + VK_GROUP_TOKEN',\n  '- Для сторис личной: stories.getPhotoUploadServer без group_id + VK_USER_TOKEN',\n  '- Для видео-сторис: stories.getVideoUploadServer вместо getPhotoUploadServer',\n  '- Загрузка медиа всегда 2 шага: 1) GET upload_url 2) POST multipart/form-data на upload_url',\n  '',\n  '[RESTORE CONTEXT — ОБЯЗАТЕЛЬНО после каждого HTTP Request]',\n  '- HTTP Request затирает контекст предыдущих нод. ВСЕГДА добавляй Code ноду после HTTP Request:',\n  '  const response = $input.first().json;',\n  '  const ctx = $(\"ИмяПредыдущейНоды\").first().json;',\n  '  return [{ json: { ...ctx, apiResult: response } }];',\n  '- Если HTTP Request скачивал файл (binary), восстанавливай и binary:',\n  '  const item = $input.first();',\n  '  const ctx = $(\"ИмяНоды\").first().json;',\n  '  return [{ json: { ...ctx }, binary: item.binary }];',\n  '',\n  '[OPENAI GPT]',\n  '- POST https://api.openai.com/v1/chat/completions',\n  '- Авторизация: sendHeaders с Authorization: Bearer KEY',\n  '- Ответ: response.choices[0].message.content',\n  '- Для JSON-ответа: добавь в system prompt \"Верни ТОЛЬКО JSON\" + try/catch при парсинге с fallback',\n  '',\n  '[TELEGRAM — ОТПРАВКА СООБЩЕНИЙ]',\n  '- POST https://api.telegram.org/bot{TOKEN}/sendMessage',\n  '- Body: { chat_id, text, parse_mode: \"HTML\" (опционально) }',\n  '- Токен в URL, НЕ в заголовке',\n  '- Лимит: 4096 символов для текста',\n  '- Для получения файла: GET .../getFile?file_id=XXX → result.file_path',\n  '- Скачать: GET https://api.telegram.org/file/bot{TOKEN}/{file_path}',\n  '',\n  '[ЗАПРЕЩЕНО В CODE НОДАХ]',\n  '- process.env — используй $env.ИМЯ или cfg объект',\n  '- require() — не работает в n8n Code нодах',\n  '- Глобальные переменные между нодами — используй $getWorkflowStaticData или передавай через json',\n].join('\\n');\n\n// ═══════════════════════════════════════════════════════════════\n// ПРАВИЛА ГЕНЕРАЦИИ\n// ═══════════════════════════════════════════════════════════════\n\nconst rules = [\n  'ПРАВИЛА ГЕНЕРАЦИИ:',\n  '',\n  '[SCOPE] Реализуй ТОЛЬКО то что указано в задаче. Никаких дополнительных фич.',\n  '[SCOPE] Простейшая архитектура — меньше нод лучше чем больше.',\n  '',\n  '[СТРУКТУРА]',\n  '- Корень: { name, nodes, connections, settings: {executionOrder:\"v1\"} }',\n  '- Нода: { id (уникальный), name (УНИКАЛЬНОЕ), type, typeVersion, position:[x,y], parameters }',\n  '- Первая нода = триггер. Все ноды соединены. Минимум 4 ноды.',\n  '',\n  '[CONNECTIONS]',\n  '- КАЖДАЯ нода (кроме триггера и Sticky Note) должна быть целевой хотя бы в одном connection.',\n  '- IF нода: main[0]=true, main[1]=false — РАЗНЫЕ целевые ноды.',\n  '- Switch нода: main[0], main[1], ... — по одному массиву на каждый output.',\n  '- Когда IF/Switch ветки должны сойтись — подключи ОБЕ ветки к ОДНОЙ следующей ноде через connections. НЕ делай отдельную Merge ноду с try/catch.',\n  '',\n  '[ПОСЛЕДОВАТЕЛЬНОСТЬ — КРИТИЧНО]',\n  '- Публикация в несколько платформ = ПОСЛЕДОВАТЕЛЬНАЯ цепочка: API_1 → Restore → API_2 → Restore → Notify',\n  '- ЗАПРЕЩЕНО: несколько параллельных веток к одной Notify ноде (она сработает несколько раз)',\n  '- Параллельные ветки допустимы ТОЛЬКО если у каждой СВОЯ конечная нода',\n  '',\n  '[PARAMETERS — КРИТИЧНО]',\n  '- HTTP Request: ВСЕГДА method, url.',\n  '- Если POST с телом: sendBody:true, specifyBody:\"json\", jsonBody.',\n  '- Если GET с параметрами: sendQueryParameters:true, queryParameters.parameters:[{name,value}].',\n  '- HTTP Request options: { timeout:30000, response:{response:{neverError:true, responseFormat:\"json\"}} }',\n  '- Для скачивания файлов: responseFormat:\"file\" вместо \"json\".',\n  '- НИКОГДА не оставляй parameters: {} — всегда заполняй.',\n  '- Авторизация OpenAI: sendHeaders:true + headerParameters с Authorization: Bearer.',\n  '',\n  '[TELEGRAM BOT — ОБЯЗАТЕЛЬНАЯ АРХИТЕКТУРА]',\n  '- Если задача включает Telegram бота с командами и ответами → ОБЯЗАТЕЛЬНО используй паттерн:',\n  '  Telegram Trigger → Router+Config (с $getWorkflowStaticData) → Switch (по action) → ветки',\n  '- Конфиг (токены, ID) хранится в объекте cfg ВНУТРИ ноды Router+Config',\n  '- НЕ используй $env для Telegram бот задач — всё в cfg объекте',\n  '',\n  '[КОНТЕКСТ] После КАЖДОГО HTTP Request добавь Code ноду для восстановления контекста.',\n  '',\n  '[ЗАПРЕЩЕНО]',\n  '- n8n-nodes-base.executeCommand, n8n-nodes-base.function — не существуют',\n  '- process.env в Code нодах — используй $env.ИМЯ или cfg объект',\n  '- Пустые parameters: {} на нодах (кроме триггеров)',\n  '- Поле credentials в нодах',\n  '- Параллельные ветки с binary данными',\n  '- try/catch для выбора между $(\"NodeA\") и $(\"NodeB\") — вместо этого подключи обе ветки к одной ноде',\n  '',\n  '[ЗАМЕНА] function → n8n-nodes-base.code (поле jsCode)',\n  '',\n  '[STICKY NOTE] Добавь n8n-nodes-base.stickyNote id:\"sticky-1\", position:[240,-300], color:3.',\n  '  Content: 1) Что делает 2) Credentials/Конфиг 3) Что настроить 4) Команды бота 5) Ошибки.',\n  '  НЕ добавлять в connections.',\n  '',\n  'Верни ТОЛЬКО JSON объект без обёрток.'\n].join('\\n');\n\nreturn [{\n  json: {\n    businessTask: $input.first().json.businessTask,\n    failedTemplates: JSON.stringify($input.first().json.failedTemplates || []),\n    exampleWorkflow: JSON.stringify(example, null, 2),\n    apiPatterns: apiPatterns,\n    rules: rules\n  }\n}];"
+      },
+      "id": "e9f115e7-f933-4ec3-b147-aa9f13f7dfd0",
+      "name": "Контекст3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -7168,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "<ANTHROPIC_API_KEY>"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 1000,\n  \"system\": \"Ты планировщик n8n воркфлоу. По описанию задачи определи какие n8n ноды и какие внешние API сервисы понадобятся.\\n\\nВерни ТОЛЬКО JSON объект без markdown:\\n{\\n  \\\"nodeHints\\\": [\\\"webhook\\\", \\\"googleSheets\\\", \\\"telegram\\\"],\\n  \\\"apiSearchQueries\\\": [\\\"telegram\\\", \\\"gemini\\\"]\\n}\\n\\nnodeHints — ключевые слова для поиска нод n8n (короткие, 1-2 слова).\\napiSearchQueries — ТОЛЬКО короткие названия сервисов, ОДНО слово каждый: \\\"telegram\\\", \\\"gemini\\\", \\\"openai\\\", \\\"stripe\\\". НИКОГДА не пиши фразы типа \\\"telegram bot api\\\" или \\\"nano banana image generation api\\\" — только одно ключевое слово. Nano Banana / Imagen / любой Google image генератор = \\\"gemini\\\". НИКОГДА не оставляй пустым.\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Задача: \" + $json.businessTask }]\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -6768,
+        208
+      ],
+      "id": "9d086c65-9e6f-4733-86f4-b3174c2a2273",
+      "name": "Planning1",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst ctx = $('Контекст3').first().json;\n\nlet plan = { nodeHints: [], apiSearchQueries: [] };\n\ntry {\n  const content = response.content || [];\n  let text = content.filter(b => b.type === 'text').map(b => b.text || '').join('');\n  text = text.replace(/^```json\\s*/i, '').replace(/\\s*```$/, '').trim();\n  const s = text.indexOf('{'), e = text.lastIndexOf('}');\n  if (s >= 0 && e > s) text = text.substring(s, e + 1);\n  const parsed = JSON.parse(text);\n  plan.nodeHints = parsed.nodeHints || [];\n  plan.apiSearchQueries = parsed.apiSearchQueries || [];\n} catch(e) {\n  const task = ctx.businessTask.toLowerCase();\n  const kw = ['webhook','http','googlesheets','telegram','slack','email','openai','gemini','notion','stripe','airtable','discord','vk'];\n  plan.nodeHints = kw.filter(k => task.includes(k));\n  plan.apiSearchQueries = plan.nodeHints.slice(0, 3);\n  if (!plan.nodeHints.length) plan.nodeHints = task.split(/[\\s,]+/).filter(w => w.length > 3).slice(0, 5);\n}\n\n// Нормализация: максимум 2 слова на запрос (не обрезаем до 1 слова)\nplan.apiSearchQueries = plan.apiSearchQueries.map(q => {\n  const words = q.toLowerCase().split(/\\s+/).slice(0, 2);\n  return words.join(' ');\n});\n\n// Маппинг известных алиасов\nconst aliasMap = {\n  'nano': 'gemini',\n  'banana': 'gemini',\n  'imagen': 'gemini',\n  'gpt': 'openai',\n  'chatgpt': 'openai',\n  'sheets': 'googlesheets',\n  'docs': 'googledocs',\n  'вк': 'vk',\n  'вконтакте': 'vk',\n  'vkontakte': 'vk',\n  'тг': 'telegram',\n  'tg': 'telegram',\n};\nplan.apiSearchQueries = plan.apiSearchQueries.map(q => aliasMap[q] || q);\n\n// Гарантируем что apiSearchQueries НЕ пустой\nif (!plan.apiSearchQueries.length) {\n  plan.apiSearchQueries = plan.nodeHints.slice(0, 3).map(h => h.split(' ')[0].toLowerCase());\n}\n\n// Убираем дубли\nplan.apiSearchQueries = [...new Set(plan.apiSearchQueries)];\n\nreturn [{\n  json: {\n    ...ctx,\n    nodeSearchQuery: plan.nodeHints.join(' ').substring(0, 150),\n    apiSearchQuery: plan.apiSearchQueries[0],\n    apiSearchQueriesAll: plan.apiSearchQueries\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -6368,
+        208
+      ],
+      "id": "e473e31c-874f-44b2-ab06-95a358653b19",
+      "name": "Extract Plan1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const searchResult = $input.first().json;\nconst ctx = $('Extract Plan1').first().json;\n\nlet nodeTypes = [];\nlet searchSummary = '';\n\ntry {\n  const content = searchResult?.result?.content;\n  let text = '';\n  if (Array.isArray(content)) text = content.map(c => c.text || '').join('\\n');\n  else if (typeof content === 'string') text = content;\n  searchSummary = text.substring(0, 3000);\n  const typeMatches = text.match(/\"nodeType\":\\s*\"([^\"]+)\"/g) || [];\n  const uniqueTypes = new Set();\n  for (const match of typeMatches) {\n    const type = match.match(/\"nodeType\":\\s*\"([^\"]+)\"/)?.[1];\n    if (type && !type.includes('Trigger') && !type.includes('stickyNote')) uniqueTypes.add(type);\n  }\n  nodeTypes = Array.from(uniqueTypes).slice(0, 4);\n} catch(e) {\n  searchSummary = 'Ошибка: ' + e.message;\n}\n\nreturn [{\n  json: {\n    ...ctx,\n    searchSummary,\n    nodeTypes\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -5568,
+        208
+      ],
+      "id": "1b7f4078-0c21-4895-ae1e-276ad1759a7b",
+      "name": "Парсинг нод1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const mcpResult = $input.first().json;\nconst ctx = $('Парсинг нод1').first().json;\n\nlet nodeDoc = '';\ntry {\n  const content = mcpResult?.result?.content;\n  if (Array.isArray(content)) nodeDoc = content.map(c => c.text || '').join('\\n');\n  else if (typeof content === 'string') nodeDoc = content;\n} catch(e) {}\n\nconst nodeType = (ctx.nodeTypes && ctx.nodeTypes[0]) || '';\nlet allDocs = ctx.searchSummary + '\\n\\n';\nif (nodeDoc) allDocs += '--- ' + nodeType + ' ---\\n' + nodeDoc.substring(0, 5000) + '\\n\\n';\n\nreturn [{\n  json: {\n    ...ctx,\n    allDocs,\n    nextNodeType: (ctx.nodeTypes && ctx.nodeTypes[1]) || ''\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4768,
+        208
+      ],
+      "id": "59b81a97-e836-4c04-92cb-9a96116c0254",
+      "name": "Save Node 1 Doc1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const mcpResult = $input.first().json;\nconst ctx = $('Save Node 1 Doc1').first().json;\n\nlet nodeDoc = '';\ntry {\n  const content = mcpResult?.result?.content;\n  if (Array.isArray(content)) nodeDoc = content.map(c => c.text || '').join('\\n');\n  else if (typeof content === 'string') nodeDoc = content;\n} catch(e) {}\n\nlet allDocs = ctx.allDocs || '';\nconst nodeType = ctx.nextNodeType || '';\nif (nodeDoc && nodeType) allDocs += '--- ' + nodeType + ' ---\\n' + nodeDoc.substring(0, 5000) + '\\n\\n';\n\nconst remaining = (ctx.nodeTypes || []).slice(2);\nif (remaining.length > 0) allDocs += '--- Дополнительные ноды ---\\n' + remaining.join(', ') + '\\n\\n';\n\nreturn [{\n  json: {\n    ...ctx,\n    nodesDocs: allDocs.substring(0, 20000)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3968,
+        208
+      ],
+      "id": "f0ace9a6-0eb4-404b-bde1-56d087302e49",
+      "name": "Собрать Node Docs1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst ctx = $('Собрать Node Docs1').first().json;\n\nlet mcpData = null;\nconst rawText = typeof raw === 'string' ? raw : (raw.data || raw.body || JSON.stringify(raw));\n\nif (typeof raw === 'object' && raw.result) mcpData = raw;\nelse {\n  const lines = String(rawText).split('\\n');\n  for (const line of lines) {\n    const trimmed = line.trim();\n    if (trimmed.startsWith('data: ')) { try { mcpData = JSON.parse(trimmed.substring(6)); break; } catch(e) {} }\n  }\n  if (!mcpData) { try { mcpData = JSON.parse(String(rawText)); } catch(e) {} }\n}\n\nlet searchText = '';\nif (mcpData?.result?.content) {\n  const content = mcpData.result.content;\n  if (Array.isArray(content)) searchText = content.map(c => c.text || '').join('\\n');\n  else if (typeof content === 'string') searchText = content;\n}\n\nconst matches = [...searchText.matchAll(/\\*\\*([^*]+)\\*\\*\\s*\\[/g)];\nconst candidates = matches.map(m => m[1]?.trim()).filter(Boolean);\n\nreturn [{\n  json: {\n    ...ctx,\n    apiSearchText: searchText.substring(0, 2000),\n    apiServiceFound: candidates[0] || ''\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3168,
+        208
+      ],
+      "id": "5b96fffa-de15-44a7-84e6-ff4d3fe5c321",
+      "name": "Парсинг API search1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "<ANTHROPIC_API_KEY>"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 20000,\n  \"system\": \"Ты — эксперт по n8n. Твоя задача: создать полный валидный JSON воркфлоу.\\n\\nВерни ТОЛЬКО JSON объект без markdown, без ```json, без любого текста до и после.\\n\\n\" + $json.rules + \"\\n\\n\" + $json.apiPatterns + \"\\n\\n=== ЭТАЛОННЫЙ ПРИМЕР СТРУКТУРЫ ===\\n\" + $json.exampleWorkflow,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"Создай воркфлоу для задачи:\\n\\n\" + $json.businessTask + (($json.failedTemplates && $json.failedTemplates !== '[]') ? \"\\n\\nЭти шаблоны не подошли, не повторяй их архитектуру:\\n\" + $json.failedTemplates : \"\") + \"\\n\\n=== ДОКУМЕНТАЦИЯ НОД ===\\n\" + $json.nodesDocs + \"\\n\\n=== API ДОКУМЕНТАЦИЯ ===\\n\" + ($json.apiDocs || \"нет данных\")\n  }]\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 180000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -1968,
+        208
+      ],
+      "id": "000c9a25-671f-4b54-ad02-c6288da12947",
+      "name": "Генерация2",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\n\nif (response.error) {\n  return [{ json: { text: '', error: response.error, businessTask: $('Execute Sub-workflow Trigger').first().json.businessTask }}];\n}\n\nconst content = response.content || [];\nlet text = content.filter(b => b.type === 'text').map(b => b.text || '').join('');\n\nif (!text || text.trim() === '') {\n  return [{ json: { text: '', error: { message: 'Claude вернул пустой ответ' }, businessTask: $('Execute Sub-workflow Trigger').first().json.businessTask }}];\n}\n\ntext = text.replace(/^```json\\s*/i, '').replace(/\\s*```$/, '').trim();\nconst firstBrace = text.indexOf('{');\nconst lastBrace = text.lastIndexOf('}');\nif (firstBrace > 0 && lastBrace > firstBrace) text = text.substring(firstBrace, lastBrace + 1);\n\ntry {\n  const parsed = JSON.parse(text);\n  if ((parsed.nodes?.length || 0) <= 1) {\n    return [{ json: { text: '', error: { message: 'Слишком мало нод: ' + (parsed.nodes?.length || 0) }, businessTask: $('Execute Sub-workflow Trigger').first().json.businessTask }}];\n  }\n} catch(e) {}\n\nreturn [{ json: { text, businessTask: $('Execute Sub-workflow Trigger').first().json.businessTask } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1568,
+        208
+      ],
+      "id": "87e81bda-0a8d-4599-9494-6bf2ceda6296",
+      "name": "Extract3"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.text || '';\nlet wf;\n\ntry {\n  let clean = raw.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  const s = clean.indexOf('{'), e = clean.lastIndexOf('}');\n  if (s >= 0 && e > s) clean = clean.substring(s, e + 1);\n  wf = JSON.parse(clean);\n} catch (e) {\n  return [{ json: { valid: false, errors: ['JSON parse: ' + e.message], workflow: null } }];\n}\n\nconst errors = [];\n\n// ═══════════════════════════════════════\n// СТРУКТУРНЫЕ ПРОВЕРКИ (существующие)\n// ═══════════════════════════════════════\n\nif (!wf.name) errors.push('Нет name');\nif (!Array.isArray(wf.nodes) || !wf.nodes.length) errors.push('Нет nodes');\nif (!wf.connections) errors.push('Нет connections');\n\nconst names = new Set();\n(wf.nodes || []).forEach((n, i) => {\n  if (!n.name) n.name = 'Node' + i;\n  if (!n.type) errors.push(n.name + ': нет type');\n  if (!n.id) n.id = 'n-' + i;\n  if (!n.typeVersion) n.typeVersion = 1;\n  if (!n.parameters) n.parameters = {};\n  if (!n.position) n.position = [250 + i * 200, 300];\n  if (names.has(n.name)) errors.push('Дубль: ' + n.name);\n  names.add(n.name);\n\n  // Пустые parameters на не-триггерах\n  if (n.type && !n.type.includes('Trigger') && !n.type.includes('stickyNote') && !n.type.includes('webhook')) {\n    if (!n.parameters || Object.keys(n.parameters).length === 0) errors.push(n.name + ': пустые parameters');\n  }\n\n  // HTTP Request проверки\n  if (n.type === 'n8n-nodes-base.httpRequest') {\n    if (!n.parameters.url) errors.push(n.name + ': HTTP без url');\n    if (!n.parameters.method) errors.push(n.name + ': HTTP без method');\n  }\n\n  // Code нода без jsCode\n  if (n.type === 'n8n-nodes-base.code' && !n.parameters.jsCode) errors.push(n.name + ': Code без jsCode');\n});\n\n// Проверка connections — source существует\nif (wf.connections) {\n  Object.entries(wf.connections).forEach(([src, conn]) => {\n    if (!names.has(src)) errors.push('Connection от: ' + src + ' (не существует)');\n    (conn.main || []).forEach(outs => (outs || []).forEach(l => {\n      if (!names.has(l.node)) errors.push('Connection к: ' + l.node + ' (не существует)');\n    }));\n  });\n}\n\n// Висящие ноды\nconst targetNodes = new Set();\nObject.values(wf.connections || {}).forEach(conn => {\n  (conn.main || []).forEach(outs => (outs || []).forEach(l => targetNodes.add(l.node)));\n});\n(wf.nodes || []).forEach(n => {\n  if (!n.type.toLowerCase().includes('trigger') && !n.type.includes('webhook') && !n.type.includes('stickyNote') && !targetNodes.has(n.name))\n    errors.push(n.name + ': висящая нода (не подключена как target ни в одном connection)');\n});\n\n// Нет триггера\nif (!wf.nodes?.some(n => n.type.toLowerCase().includes('trigger') || n.type.includes('webhook')))\n  errors.push('Нет триггера');\n\n// ═══════════════════════════════════════\n// ЛОГИЧЕСКИЕ ПРОВЕРКИ (НОВЫЕ)\n// ═══════════════════════════════════════\n\nconst allJsCode = (wf.nodes || [])\n  .filter(n => n.type === 'n8n-nodes-base.code')\n  .map(n => n.parameters?.jsCode || '')\n  .join('\\n');\nconst allJson = JSON.stringify(wf.nodes || []);\n\n// 1. Telegram бот без управления состоянием\nconst hasTgTrigger = (wf.nodes || []).some(n => n.type?.includes('telegramTrigger'));\nconst hasStaticData = allJsCode.includes('getWorkflowStaticData');\nconst taskLower = ($('Execute Sub-workflow Trigger').first().json.businessTask || '').toLowerCase();\nconst taskNeedsDialog = taskLower.includes('выложи') || taskLower.includes('команд') ||\n  (taskLower.includes('бот') && (taskLower.includes('текст') || taskLower.includes('фото') || taskLower.includes('сторис') || taskLower.includes('пост')));\n\nif (hasTgTrigger && taskNeedsDialog && !hasStaticData) {\n  errors.push('КРИТИЧНО: Telegram бот с двухшаговым диалогом без $getWorkflowStaticData — бот не будет различать команду и ответ пользователя');\n}\n\n// 2. process.env в Code нодах\n(wf.nodes || []).forEach(n => {\n  if (n.type === 'n8n-nodes-base.code' && n.parameters?.jsCode?.includes('process.env')) {\n    errors.push(n.name + ': используй $env вместо process.env (process.env недоступен в n8n Code нодах)');\n  }\n});\n\n// 3. VK через POST+JSON body вместо GET+query\n(wf.nodes || []).forEach(n => {\n  const url = n.parameters?.url || '';\n  const method = n.parameters?.method || '';\n  const hasJsonBody = n.parameters?.specifyBody === 'json';\n  if (url.includes('api.vk.com/method/') && method === 'POST' && hasJsonBody) {\n    if (!url.includes('pu.vk.com') && !url.includes('Upload')) {\n      errors.push(n.name + ': VK API метод не должен использовать POST+JSON body. Используй GET с queryParameters');\n    }\n  }\n});\n\n// 4. VK wall.post без обязательных параметров\n(wf.nodes || []).forEach(n => {\n  const url = n.parameters?.url || '';\n  if (url.includes('wall.post')) {\n    const nodeStr = JSON.stringify(n.parameters || {});\n    if (!nodeStr.includes('owner_id')) errors.push(n.name + ': wall.post без owner_id');\n    if (!nodeStr.includes('access_token')) errors.push(n.name + ': wall.post без access_token');\n  }\n});\n\n// 5. HTTP Request без neverError\n(wf.nodes || []).forEach(n => {\n  if (n.type === 'n8n-nodes-base.httpRequest') {\n    const opts = n.parameters?.options?.response?.response;\n    if (!opts?.neverError) {\n      errors.push(n.name + ': HTTP Request без neverError:true — workflow упадёт при ошибке API');\n    }\n  }\n});\n\n// 6. Switch с expression mode но без numberOutputs\n(wf.nodes || []).forEach(n => {\n  if (n.type === 'n8n-nodes-base.switch' && n.parameters?.mode === 'expression') {\n    if (!n.parameters.numberOutputs) {\n      errors.push(n.name + ': Switch с mode=expression без numberOutputs');\n    }\n  }\n});\n\n// 7. Параллельные ветки к одной ноде-уведомлению (дублирование)\nconst incomingConnectionCounts = {};\nObject.values(wf.connections || {}).forEach(conn => {\n  (conn.main || []).forEach(outs => (outs || []).forEach(l => {\n    incomingConnectionCounts[l.node] = (incomingConnectionCounts[l.node] || 0) + 1;\n  }));\n});\n\n// Считаем сколько РАЗНЫХ source-нод ведут к каждой ноде\nconst incomingSourceNodes = {};\nObject.entries(wf.connections || {}).forEach(([src, conn]) => {\n  (conn.main || []).forEach(outs => (outs || []).forEach(l => {\n    if (!incomingSourceNodes[l.node]) incomingSourceNodes[l.node] = new Set();\n    incomingSourceNodes[l.node].add(src);\n  }));\n});\n\nObject.entries(incomingSourceNodes).forEach(([nodeName, sources]) => {\n  if (sources.size > 1) {\n    const node = (wf.nodes || []).find(n => n.name === nodeName);\n    if (node && node.type === 'n8n-nodes-base.httpRequest') {\n      const url = node.parameters?.url || '';\n      const isTgSendMessage = url.includes('sendMessage');\n      const isNotify = nodeName.toLowerCase().includes('notify') || nodeName.toLowerCase().includes('done');\n      \n      if (isTgSendMessage && isNotify) {\n        // Проверяем: это IF/Switch merge (ок) или параллельные API-ветки (плохо)?\n        // Если оба source — это Restore/Code ноды после РАЗНЫХ HTTP Request — это параллельные ветки\n        const sourceArr = Array.from(sources);\n        const sourceNodes = sourceArr.map(s => (wf.nodes || []).find(n => n.name === s));\n        const allSourcesAreRestoreAfterHttp = sourceNodes.every(sn => {\n          if (!sn || sn.type !== 'n8n-nodes-base.code') return false;\n          // Проверяем что это Restore нода после HTTP (имя содержит restore/after)\n          const name = (sn.name || '').toLowerCase();\n          return name.includes('restore') || name.includes('after');\n        });\n        \n        if (allSourcesAreRestoreAfterHttp && sources.size >= 2) {\n          errors.push(nodeName + ': получает данные из ' + sources.size + ' параллельных Restore-нод — уведомление отправится ' + sources.size + ' раза. Сделай ПОСЛЕДОВАТЕЛЬНУЮ цепочку: API_1 → Restore → API_2 → Restore → Notify');\n        }\n      }\n    }\n  }\n});\n\n// 8. try/catch для выбора между $() нодами в Code\n(wf.nodes || []).forEach(n => {\n  if (n.type === 'n8n-nodes-base.code' && n.parameters?.jsCode) {\n    const code = n.parameters.jsCode;\n    if (code.includes('try') && code.includes('catch')) {\n      // Находим все ссылки $('NodeName')\n      const refs = code.match(/\\$\\(['\"][^'\"]+['\"]\\)/g) || [];\n      const uniqueRefs = new Set(refs);\n      if (uniqueRefs.size >= 2 && code.includes('catch')) {\n        // Проверяем паттерн: try { x = $('A') } catch { x = $('B') }\n        const hasFallbackPattern = code.includes('catch') &&\n          refs.length >= 2 &&\n          (code.includes('if (!ctx)') || code.includes('= $(' ));\n        if (hasFallbackPattern) {\n          errors.push(n.name + ': использует try/catch для выбора между нодами (' + Array.from(uniqueRefs).join(', ') + ') — это ненадёжно. Подключи обе ветки к следующей ноде через connections, n8n сам возьмёт данные из сработавшей ветки');\n        }\n      }\n    }\n  }\n});\n\n// ═══════════════════════════════════════\n// АВТОМАТИЧЕСКИЕ ИСПРАВЛЕНИЯ\n// ═══════════════════════════════════════\n\n// Убираем credentials\nwf.nodes?.forEach(n => { delete n.credentials; });\n\n// Ставим settings\nwf.settings = { executionOrder: 'v1' };\n\n// Определяем серьёзность ошибок\nconst serious = errors.filter(e =>\n  !e.includes('Дубль')\n);\n\nreturn [{\n  json: {\n    valid: serious.length === 0,\n    errors,\n    workflow: wf,\n    businessTask: $('Execute Sub-workflow Trigger').first().json.businessTask\n  }\n}];"
+      },
+      "id": "9ca45022-7d1c-4ff6-b654-79887fdc7ba7",
+      "name": "Валидация2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1168,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "id-1",
+              "leftValue": "={{ $json.valid }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "36853158-77ce-41a7-b666-a71647315456",
+      "name": "Валидно?2",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -768,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://your-instance.app.n8n.cloud/api/v1/workflows",
+        "authentication": "<AUTHENTICATION>",
+        "genericAuthType": "<GENERICAUTHTYPE>",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.workflow) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "8ba1e2d0-6237-42ca-9b97-b96f453419a1",
+      "name": "Пробная загрузка2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -64,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "id-1",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "dd6dacd5-f136-4f40-9ff8-8d26bc7b1f42",
+      "name": "API принял?2",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        240,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=https://your-instance.app.n8n.cloud/api/v1/workflows/{{ $json.id }}",
+        "authentication": "<AUTHENTICATION>",
+        "genericAuthType": "<GENERICAUTHTYPE>",
+        "options": {}
+      },
+      "id": "68d4d73b-5b30-4f2f-95fd-4e60b5d9b7bb",
+      "name": "Удалить пробный2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        544,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const wf = $('Валидация2').first().json.workflow;\nreturn [{ json: {\n  success: true,\n  workflowJson: wf,\n  workflowName: wf.name,\n  businessTask: $('Execute Sub-workflow Trigger').first().json.businessTask,\n  summary: 'Воркфлоу сгенерирован и прошёл валидацию API'\n} }];"
+      },
+      "id": "73f84b77-c0d6-4dd6-96e6-1f60c5685c82",
+      "name": "Результат2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        848,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.all()[0].json;\nlet errorDetail = response.message || (typeof response.error === 'string' ? response.error : JSON.stringify(response.error || response).substring(0, 500));\nreturn [{ json: {\n  success: false,\n  error: 'API rejected: ' + errorDetail,\n  workflowJson: $('Валидация2').first().json.workflow,\n  businessTask: $('Execute Sub-workflow Trigger').first().json.businessTask,\n  summary: 'n8n API не принял: ' + errorDetail\n} }];"
+      },
+      "id": "270e20e6-38e5-4119-a653-a8ec819481ed",
+      "name": "Ошибка API2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "retryCount",
+              "value": "={{ $json.retryCount ? $json.retryCount + 1 : 1 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "ab75d8bb-507e-4e9a-a9ce-20eca26eae51",
+      "name": "Счётчик попыток2",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -368,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "id-1",
+              "leftValue": "={{ $json.retryCount }}",
+              "rightValue": 2,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "50673a1a-2c9d-4e75-863f-e3053bd032e6",
+      "name": "Попытки исчерпаны?2",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -176,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { success: false, error: 'Validation failed after max retries', errors: $input.first().json.errors || [] } }];"
+      },
+      "id": "e1707a21-34e7-40ff-b4cc-d8678d3b4ae8",
+      "name": "Ошибка валидации2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        128,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "<ANTHROPIC_API_KEY>"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  \"model\": \"claude-opus-4-6\",\n  \"max_tokens\": 20000,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"В JSON ошибки: \" + JSON.stringify($json.errors) + \".\\nВот JSON: \" + JSON.stringify($json.workflow) + \".\\n\\nИсправь все ошибки и верни только исправленный JSON без обёрток.\"\n  }]\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        112,
+        784
+      ],
+      "id": "7b90ee32-fa2c-4d9a-bda6-2e64d0ad6f09",
+      "name": "Исправление2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "<AUTHENTICATION>",
+        "genericAuthType": "<GENERICAUTHTYPE>",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  \"model\": \"gpt-5.2\",\n  \"max_completion_tokens\": 4000,\n  \"response_format\": {\"type\": \"json_object\"},\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"В JSON ошибки: \" + JSON.stringify($json.errors) + \".\\nВот JSON: \" + JSON.stringify($json.workflow) + \".\\n\\nИсправь все ошибки и верни только исправленный JSON без обёрток.\"\n  }]\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        432,
+        576
+      ],
+      "id": "22c858ef-0c50-45ef-9c6c-e8daa8ba9ea1",
+      "name": "Исправление3"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst wf = item.workflow;\nconst fixes = [];\n\nif (!wf || !wf.nodes) {\n  return [{ json: item }];\n}\n\n// ═══════════════════════════════════════\n// FIX 1: Добавить neverError ко всем HTTP Request\n// ═══════════════════════════════════════\nwf.nodes.forEach(n => {\n  if (n.type === 'n8n-nodes-base.httpRequest') {\n    if (!n.parameters.options) n.parameters.options = {};\n    if (!n.parameters.options.response) n.parameters.options.response = {};\n    if (!n.parameters.options.response.response) n.parameters.options.response.response = {};\n\n    if (!n.parameters.options.response.response.neverError) {\n      n.parameters.options.response.response.neverError = true;\n      fixes.push(n.name + ': добавлен neverError:true');\n    }\n\n    if (!n.parameters.options.response.response.responseFormat) {\n      // Определяем формат по контексту\n      const url = n.parameters.url || '';\n      if (url.includes('/file/bot') || n.parameters.options?.response?.response?.responseFormat === 'file') {\n        n.parameters.options.response.response.responseFormat = 'file';\n      } else {\n        n.parameters.options.response.response.responseFormat = 'json';\n      }\n      fixes.push(n.name + ': добавлен responseFormat');\n    }\n\n    // Добавить timeout если нет\n    if (!n.parameters.options.timeout) {\n      n.parameters.options.timeout = 30000;\n      fixes.push(n.name + ': добавлен timeout:30000');\n    }\n  }\n});\n\n// ═══════════════════════════════════════\n// FIX 2: Убрать credentials (n8n API не принимает)\n// ═══════════════════════════════════════\nwf.nodes.forEach(n => {\n  if (n.credentials) {\n    delete n.credentials;\n    fixes.push(n.name + ': удалён credentials');\n  }\n});\n\n// ═══════════════════════════════════════\n// FIX 3: settings.executionOrder = 'v1'\n// ═══════════════════════════════════════\nif (!wf.settings || wf.settings.executionOrder !== 'v1') {\n  wf.settings = { executionOrder: 'v1' };\n  fixes.push('settings: установлен executionOrder:v1');\n}\n\n// ═══════════════════════════════════════\n// FIX 4: Исправить позиции если совпадают\n// ═══════════════════════════════════════\nconst positionMap = new Map();\nwf.nodes.forEach(n => {\n  if (!n.position) n.position = [250, 300];\n  const key = n.position[0] + ',' + n.position[1];\n  if (positionMap.has(key)) {\n    n.position = [n.position[0], n.position[1] + 200];\n    fixes.push(n.name + ': сдвинута позиция (совпадала с ' + positionMap.get(key) + ')');\n  }\n  positionMap.set(n.position[0] + ',' + n.position[1], n.name);\n});\n\n// ═══════════════════════════════════════\n// FIX 5: Добавить typeVersion если нет\n// ═══════════════════════════════════════\nwf.nodes.forEach(n => {\n  if (!n.typeVersion) {\n    if (n.type === 'n8n-nodes-base.httpRequest') n.typeVersion = 4.2;\n    else if (n.type === 'n8n-nodes-base.code') n.typeVersion = 2;\n    else if (n.type === 'n8n-nodes-base.telegramTrigger') n.typeVersion = 1.1;\n    else if (n.type === 'n8n-nodes-base.switch') n.typeVersion = 3.2;\n    else if (n.type === 'n8n-nodes-base.if') n.typeVersion = 2.1;\n    else if (n.type === 'n8n-nodes-base.set') n.typeVersion = 3.4;\n    else if (n.type === 'n8n-nodes-base.stickyNote') n.typeVersion = 1;\n    else n.typeVersion = 1;\n    fixes.push(n.name + ': добавлен typeVersion');\n  }\n});\n\n// ═══════════════════════════════════════\n// FIX 6: Исправить process.env → $env\n// ═══════════════════════════════════════\nwf.nodes.forEach(n => {\n  if (n.type === 'n8n-nodes-base.code' && n.parameters?.jsCode) {\n    if (n.parameters.jsCode.includes('process.env.')) {\n      n.parameters.jsCode = n.parameters.jsCode.replace(/process\\.env\\.(\\w+)/g, '\\\\$env.$1');\n      fixes.push(n.name + ': исправлен process.env → $env');\n    }\n  }\n});\n\n// ═══════════════════════════════════════\n// FIX 7: Убрать n8n-nodes-base.function → code\n// ═══════════════════════════════════════\nwf.nodes.forEach(n => {\n  if (n.type === 'n8n-nodes-base.function') {\n    n.type = 'n8n-nodes-base.code';\n    n.typeVersion = 2;\n    if (n.parameters.functionCode && !n.parameters.jsCode) {\n      n.parameters.jsCode = n.parameters.functionCode;\n      delete n.parameters.functionCode;\n    }\n    fixes.push(n.name + ': заменён function → code');\n  }\n});\n\n// ═══════════════════════════════════════\n// FIX 8: Уникальные ID\n// ═══════════════════════════════════════\nconst usedIds = new Set();\nwf.nodes.forEach((n, i) => {\n  if (!n.id || usedIds.has(n.id)) {\n    n.id = 'node-' + i + '-' + Date.now().toString(36);\n    fixes.push(n.name + ': сгенерирован уникальный id');\n  }\n  usedIds.add(n.id);\n});\n\nreturn [{\n  json: {\n    ...item,\n    workflow: wf,\n    autoFixes: fixes\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -576,
+        -16
+      ],
+      "id": "6957b793-1871-40d8-b208-4b88d81c8e1e",
+      "name": "Auto-Fix"
+    },
+    {
+      "parameters": {
+        "content": "## Валидно? → False ветка (Retry)\n\n### Счётчик попыток\nIncrements `retryCount`. Первая итерация = 1.\n\n### Попытки исчерпаны?\nЕсли retryCount ≥ 2 → Ошибка валидации (стоп).\nИначе → Исправление.\n\n### Исправление (GPT-5.2)\nОтправляет ошибки + текущий JSON в GPT-5.2 с просьбой исправить.\n**Почему GPT а не Claude:** Дешевле, быстрее, задача простая (фикс JSON по списку ошибок).\n\n### Code in JavaScript1\nExtract — достаёт content из ответа GPT.\n\n### → Валидация (цикл)\nИсправленный JSON снова проходит валидацию.\n\n**Максимум:** 2 попытки исправления.",
+        "height": 544,
+        "width": 450,
+        "color": 3
+      },
+      "id": "87e8fa53-dec0-48ab-a858-dd39076ae4c0",
+      "name": "📝 False ветка",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2608,
+        -1856
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Ошибка API\n**Что делает:**\nВозвращает объект:\n- `success: false`\n- `error: 'API rejected workflow'`\n- `details` — полный ответ n8n API с причиной\n\n**Почему:**\nДаже если JSON структурно валиден, n8n API может отклонить его по другим причинам (неизвестный тип ноды, лишние поля). Детали помогают отладить проблему.",
+        "height": 386,
+        "width": 300
+      },
+      "id": "9e4dd882-50c2-4053-8923-6b409b9f14c7",
+      "name": "Sticky Note - ErrAPI",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2096,
+        -1696
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Ошибка валидации\n**Что делает:**\nВозвращает объект:\n- `success: false`\n- `error: 'Validation failed after max retries'`\n- `errors` — список конкретных ошибок\n\n**Почему:**\nОркестратор должен знать что Builder не справился чтобы отправить пользователю понятное сообщение и предложить переформулировать задачу.",
+        "height": 338,
+        "width": 300
+      },
+      "id": "8223fdf3-6c0c-4d51-a2ed-fab6557cbf1d",
+      "name": "Sticky Note - ErrValidation",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1728,
+        -1680
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Исправление\n**Что делает:**\nPOST к OpenAI — отправляет список ошибок + исходный JSON\nПросит исправить и вернуть валидный JSON\nTimeout: 600 000 мс\n\n**Почему:**\nВместо полной перегенерации — точечное исправление дешевле и быстрее. LLM видит конкретные ошибки и исправляет именно их.",
+        "height": 274,
+        "width": 300
+      },
+      "id": "37ffa7a7-e5fe-4350-957b-d28ac0323cab",
+      "name": "Sticky Note - Fix",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1584,
+        -1280
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Попытки исчерпаны?\n**Что делает:**\nIF-нода: проверяет `retryCount >= 2`\n- True → Ошибка валидации (выход)\n- False → Исправление (ещё одна попытка починить JSON)\n\n**Почему:**\nОграничиваем 2 попытками исправления чтобы не тратить токены впустую если LLM системно генерирует плохой JSON.",
+        "height": 274,
+        "width": 300
+      },
+      "id": "e9ef192e-af59-4d38-b90e-1e9b6424b638",
+      "name": "Sticky Note - MaxRetries",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1392,
+        -1632
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Счётчик попыток\n**Что делает:**\nИнкрементирует `retryCount` на 1 при каждом проходе\n\n**Почему:**\nНужен чтобы избежать бесконечного цикла. Передаёт счётчик в ноду «Попытки исчерпаны?»",
+        "height": 228,
+        "width": 280
+      },
+      "id": "712563f5-8429-48b7-9775-a1ce24dfeed7",
+      "name": "Sticky Note - Counter",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1072,
+        -1632
+      ]
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "businessTask"
+            },
+            {
+              "name": "failedTemplates",
+              "type": "array"
+            }
+          ]
+        }
+      },
+      "id": "766f462b-fa75-41d3-bba0-f84e19397f20",
+      "name": "Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -7280,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst task = ($input.first().json.businessTask || '').toLowerCase();\nconst failedTemplates = $input.first().json.failedTemplates || [];\n\n// Classify complexity\nlet complexity = 'simple';\nconst complexSignals = ['polling', 'async', 'очередь', 'queue', 'batch', 'несколько', 'множеств', 'видео генера', 'face swap', 'replicate', 'wavespeed'];\nconst mediumSignals = ['бот', 'bot', 'диалог', 'state', 'сторис', 'stories', 'vk', 'вк', 'openai', 'gpt', 'ai'];\n\nif (complexSignals.some(s => task.includes(s))) complexity = 'complex';\nelse if (mediumSignals.filter(s => task.includes(s)).length >= 2) complexity = 'medium';\n\n// Classify pattern\nlet pattern = 'api_integration';\nif (task.includes('telegram') || task.includes('тг') || task.includes('бот') || task.includes('bot')) pattern = 'telegram_bot';\nelse if (task.includes('webhook') || task.includes('form') || task.includes('заявк')) pattern = 'webhook_handler';\nelse if (task.includes('schedule') || task.includes('расписани') || task.includes('cron') || task.includes('каждый')) pattern = 'scheduled_task';\nelse if (task.includes('forward') || task.includes('перес') || task.includes('копир')) pattern = 'forwarder';\n\n// Extract search keywords\nconst allKeywords = task.split(/[\\s,.:;!?()]+/).filter(w => w.length > 2);\nconst serviceKeywords = ['telegram', 'vk', 'openai', 'gpt', 'google', 'sheets', 'notion', 'airtable', 'stripe', 'slack', 'discord', 'whatsapp', 'instagram', 'email', 'smtp', 'gemini', 'replicate', 'wavespeed'];\nconst detectedServices = serviceKeywords.filter(s => task.includes(s));\n\n// Alias normalization\nconst aliasMap = { 'тг': 'telegram', 'вк': 'vk', 'вконтакте': 'vk', 'gpt': 'openai', 'chatgpt': 'openai', 'nano': 'gemini', 'banana': 'gemini', 'imagen': 'gemini' };\nconst normalizedServices = [...new Set(detectedServices.map(s => aliasMap[s] || s))];\nif (!normalizedServices.length) normalizedServices.push('http');\n\nreturn [{ json: {\n  businessTask: $input.first().json.businessTask,\n  failedTemplates,\n  complexity,\n  pattern,\n  services: normalizedServices,\n  nodeSearchQuery: allKeywords.slice(0, 8).join(' ').substring(0, 150),\n  apiSearchQueries: normalizedServices.slice(0, 5)\n}}];\n"
+      },
+      "id": "a17fb970-8b93-4f1f-92d5-30f92311b696",
+      "name": "Classify Task",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -6976,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "fC17R3GSnBvKp4Ow",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/fC17R3GSnBvKp4Ow",
+          "cachedResultName": "RAG Template Search"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [
+            "businessTask"
+          ],
+          "schema": [
+            {
+              "id": "businessTask",
+              "displayName": "businessTask",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "ed3fc3b6-31c8-417c-b042-a2cb583a0d23",
+      "name": "RAG: Fetch Templates",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        -6688,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst ragOutput = $input.first().json;\nconst classify = $('Classify Task').first().json;\n\n// Extract templates from RAG response - adapt to your RAG output format\nlet templates = [];\ntry {\n  if (Array.isArray(ragOutput.templates)) templates = ragOutput.templates;\n  else if (ragOutput.workflow) templates = [ragOutput.workflow];\n  else if (ragOutput.results) templates = ragOutput.results;\n  else if (typeof ragOutput === 'object' && ragOutput.nodes) templates = [ragOutput];\n} catch(e) {}\n\n// Limit to 3 best templates, truncate each to 8000 chars\nconst templateTexts = templates.slice(0, 3).map((t, i) => {\n  const str = typeof t === 'string' ? t : JSON.stringify(t, null, 2);\n  return '--- Template ' + (i+1) + ' ---\\n' + str.substring(0, 8000);\n}).join('\\n\\n');\n\nreturn [{ json: {\n  ...classify,\n  ragTemplates: templateTexts || 'No templates found',\n  ragTemplateCount: templates.length\n}}];\n"
+      },
+      "id": "26fdecb3-f69c-491b-8b11-36315c585292",
+      "name": "Parse RAG",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -6384,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://your-service.example.com/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "<AUTHORIZATION>"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", method: \"tools/call\", params: { name: \"search_nodes\", arguments: { query: $json.nodeSearchQuery, includeExamples: true } }, id: 1 }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "97273be5-6a1f-4986-bf35-a8e3d4b6a817",
+      "name": "MCP: Search Nodes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -6080,
+        2752
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst searchResult = $input.first().json;\nconst ctx = $('Parse RAG').first().json;\n\nlet nodeTypes = [];\nlet searchSummary = '';\n\ntry {\n  const content = searchResult?.result?.content;\n  let text = '';\n  if (Array.isArray(content)) text = content.map(c => c.text || '').join('\\n');\n  else if (typeof content === 'string') text = content;\n  searchSummary = text.substring(0, 3000);\n  const typeMatches = text.match(/\"nodeType\":\\s*\"([^\"]+)\"/g) || [];\n  const uniqueTypes = new Set();\n  for (const match of typeMatches) {\n    const type = match.match(/\"nodeType\":\\s*\"([^\"]+)\"/)?.[1];\n    if (type && !type.includes('Trigger') && !type.includes('stickyNote')) uniqueTypes.add(type);\n  }\n  nodeTypes = Array.from(uniqueTypes).slice(0, 4);\n} catch(e) {\n  searchSummary = 'Error: ' + e.message;\n}\n\nreturn [{ json: { ...ctx, searchSummary, nodeTypes } }];\n"
+      },
+      "id": "d8c17ed9-6295-4620-8ee5-b60a54a29254",
+      "name": "Parse Nodes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -5776,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst mcpResult = $input.first().json;\nconst ctx = $('Parse Nodes').first().json;\nlet nodeDoc = '';\ntry {\n  const content = mcpResult?.result?.content;\n  if (Array.isArray(content)) nodeDoc = content.map(c => c.text || '').join('\\n');\n  else if (typeof content === 'string') nodeDoc = content;\n} catch(e) {}\nconst nodeType = (ctx.nodeTypes && ctx.nodeTypes[0]) || '';\nlet allDocs = ctx.searchSummary + '\\n\\n';\nif (nodeDoc) allDocs += '--- ' + nodeType + ' ---\\n' + nodeDoc.substring(0, 5000) + '\\n\\n';\nreturn [{ json: { ...ctx, allDocs, nextNodeType: (ctx.nodeTypes && ctx.nodeTypes[1]) || '' } }];\n"
+      },
+      "id": "cb1493f7-b0b0-4164-ade6-77b97c2276a7",
+      "name": "Save Node 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -5184,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst mcpResult = $input.first().json;\nconst ctx = $('Save Node 1').first().json;\nlet nodeDoc = '';\ntry {\n  const content = mcpResult?.result?.content;\n  if (Array.isArray(content)) nodeDoc = content.map(c => c.text || '').join('\\n');\n  else if (typeof content === 'string') nodeDoc = content;\n} catch(e) {}\nlet allDocs = ctx.allDocs || '';\nconst nodeType = ctx.nextNodeType || '';\nif (nodeDoc && nodeType) allDocs += '--- ' + nodeType + ' ---\\n' + nodeDoc.substring(0, 5000) + '\\n\\n';\nconst remaining = (ctx.nodeTypes || []).slice(2);\nif (remaining.length > 0) allDocs += '--- Additional nodes ---\\n' + remaining.join(', ') + '\\n\\n';\nreturn [{ json: { ...ctx, nodesDocs: allDocs.substring(0, 20000) } }];\n"
+      },
+      "id": "69881688-d74e-46f7-84e6-75713ee5e80c",
+      "name": "Collect Node Docs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4576,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://your-service.example.com/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", method: \"tools/call\", params: { name: \"search_api\", arguments: { query: ($json.apiSearchQueries || ['http']).join(' ') } }, id: 20 }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "ce3bfe0c-c6c3-48ee-b120-987cdd395427",
+      "name": "MCP: Search API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -4288,
+        2752
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst raw = $input.first().json;\nconst ctx = $('Collect Node Docs').first().json;\n\nlet mcpData = null;\nconst rawText = typeof raw === 'string' ? raw : (raw.data || raw.body || JSON.stringify(raw));\n\nif (typeof raw === 'object' && raw.result) mcpData = raw;\nelse {\n  const lines = String(rawText).split('\\n');\n  for (const line of lines) {\n    const trimmed = line.trim();\n    if (trimmed.startsWith('data: ')) { try { mcpData = JSON.parse(trimmed.substring(6)); break; } catch(e) {} }\n  }\n  if (!mcpData) { try { mcpData = JSON.parse(String(rawText)); } catch(e) {} }\n}\n\nlet searchText = '';\nif (mcpData?.result?.content) {\n  const content = mcpData.result.content;\n  if (Array.isArray(content)) searchText = content.map(c => c.text || '').join('\\n');\n  else if (typeof content === 'string') searchText = content;\n}\n\nconst matches = [...searchText.matchAll(/\\*\\*([^*]+)\\*\\*\\s*\\[/g)];\nconst candidates = matches.map(m => m[1]?.trim()).filter(Boolean);\n\nreturn [{ json: { ...ctx, apiSearchText: searchText.substring(0, 2000), apiServiceFound: candidates[0] || '' } }];\n"
+      },
+      "id": "438270f6-3549-4fd2-8cc3-f4e04c93c314",
+      "name": "Parse API Search",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3984,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst raw = $input.first().json;\nconst ctx = $('Parse API Search').first().json;\n\n// Parse MCP API docs response\nlet mcpData = null;\nconst rawText = typeof raw === 'string' ? raw : (raw.data || raw.body || JSON.stringify(raw));\nif (typeof raw === 'object' && raw.result) mcpData = raw;\nelse {\n  const lines = String(rawText).split('\\n');\n  for (const line of lines) {\n    const trimmed = line.trim();\n    if (trimmed.startsWith('data: ')) { try { mcpData = JSON.parse(trimmed.substring(6)); break; } catch(e) {} }\n  }\n  if (!mcpData) { try { mcpData = JSON.parse(String(rawText)); } catch(e) {} }\n}\n\nlet apiDocsText = '';\nif (mcpData?.result?.content) {\n  const content = mcpData.result.content;\n  if (Array.isArray(content)) apiDocsText = content.map(c => c.text || '').join('\\n');\n  else if (typeof content === 'string') apiDocsText = content;\n}\n\n// ═══════════════════════════════════════════\n// HARDCODED API KNOWLEDGE BASE (fallback)\n// ═══════════════════════════════════════════\nconst knownApis = {\nvk: `# VK API\nBase URL: https://api.vk.com/method/\nВАЖНО: VK = GET + query params. access_token передаётся как query param.\n\n## ДВА ТОКЕНА\n- VK_GROUP_TOKEN: токен сообщества. Права: wall, stories, offline. Для: wall.post от имени группы (from_group=1), stories в группу\n- VK_USER_TOKEN: токен пользователя (OAuth scope=wall,stories,offline). Для: wall.post на личную стену, личные сторис\n\n## wall.post\nGET https://api.vk.com/method/wall.post?owner_id=...&message=...&from_group=1&access_token=...&v=5.199\n- Группа: owner_id = \"-\" + GROUP_ID (отрицательное)\n- Личная: owner_id = USER_ID (положительное), без from_group\n\n## stories.getPhotoUploadServer\n- Группа: ?group_id=GROUP_ID&add_to_news=1&access_token=VK_GROUP_TOKEN&v=5.199\n- Личная: ?add_to_news=1&access_token=VK_USER_TOKEN&v=5.199 (без group_id)\n- Видео: stories.getVideoUploadServer аналогично\n\n## Загрузка медиа (2 шага):\n1) GET stories.getPhotoUploadServer → upload_url\n2) POST на upload_url с multipart/form-data, поле \"file\" = бинарный файл\nВ n8n: contentType: \"multipart-form-data\", bodyParameters: [{ parameterType: \"formBinaryData\", name: \"file\", inputDataFieldName: \"data\" }]\n\n## Лимиты: wall.post message макс 16384; Сторис фото JPEG/PNG макс 10MB; Видео MP4 макс 30 сек`,\n\ntelegram: `# Telegram Bot API\nBase URL: https://api.telegram.org/bot{TOKEN}/\nТокен В URL-пути, НЕ в заголовке.\n\n## sendMessage: POST .../sendMessage, Body: { chat_id, text, parse_mode: \"HTML\" (опционально) }. Лимит 4096 символов.\n## sendPhoto: POST .../sendPhoto, Body: { chat_id, photo: file_id или URL, caption (макс 1024) }\n## sendVideo: POST .../sendVideo, Body: { chat_id, video: file_id или URL, caption }\n## getFile: GET .../getFile?file_id=XXX → result.file_path. Скачать: GET https://api.telegram.org/file/bot{TOKEN}/{file_path}\n\n## Telegram Trigger в n8n\nНода n8n-nodes-base.telegramTrigger, typeVersion: 1.1, parameters: { updates: [\"message\"] }\nОбъект: message.from.id, message.chat.id, message.text, message.photo[last].file_id, message.video.file_id\n\n## ВАЖНО: Бот = админ канала для публикации. chat_id канала: @username или -100xxxxxxxxxx. Двухшаговый диалог: $getWorkflowStaticData(\"global\")`,\n\nopenai: `# OpenAI API\nPOST https://api.openai.com/v1/chat/completions\nHeaders: Authorization: Bearer sk-...\nBody: { \"model\": \"gpt-4o-mini\", \"messages\": [{role,content}], \"max_tokens\": 1500 }\nResponse: choices[0].message.content\nВ n8n: sendHeaders: true, headerParameters: [{ name: \"Authorization\", value: \"=Bearer {{ $json.cfg.OPENAI_API_KEY }}\" }]`,\n\ngemini: `# Gemini Image API\nPOST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key={API_KEY}\nBody: { contents: [{parts:[{text:\"PROMPT\"}]}], generationConfig: {responseModalities:[\"TEXT\",\"IMAGE\"]} }\nResponse: candidates[0].content.parts[] — image: part.inlineData.data (base64)`,\n\nstripe: `# Stripe API. Base: https://api.stripe.com/v1. Auth: Bearer sk_...`,\nnotion: `# Notion API. Base: https://api.notion.com/v1. Auth: Bearer token, Notion-Version: 2022-06-28`\n};\n\nconst aliases = {\n  'nano-banana': 'gemini', 'nanbanana': 'gemini', 'imagen': 'gemini',\n  'gpt': 'openai', 'chatgpt': 'openai', 'dall-e': 'openai', 'dalle': 'openai',\n  'вк': 'vk', 'вконтакте': 'vk', 'vkontakte': 'vk',\n  'тг': 'telegram', 'tg': 'telegram'\n};\n\nconst allServices = ctx.apiSearchQueries || [];\nconst extraDocs = [];\nconst mcpLower = apiDocsText.toLowerCase();\n\nfor (let service of allServices) {\n  service = service.toLowerCase();\n  const resolvedKey = aliases[service] || service;\n  const isCoveredByMcp = mcpLower.includes(service) || mcpLower.includes(resolvedKey);\n  if (!isCoveredByMcp && knownApis[resolvedKey]) {\n    extraDocs.push(knownApis[resolvedKey]);\n  }\n}\n\nconst combinedApiDocs = [apiDocsText, ...extraDocs].filter(Boolean).join('\\n\\n---\\n\\n').substring(0, 18000);\n\nreturn [{ json: {\n  businessTask: ctx.businessTask,\n  failedTemplates: ctx.failedTemplates,\n  complexity: ctx.complexity,\n  pattern: ctx.pattern,\n  services: ctx.services,\n  ragTemplates: ctx.ragTemplates,\n  ragTemplateCount: ctx.ragTemplateCount,\n  nodesDocs: ctx.nodesDocs,\n  apiDocs: combinedApiDocs\n}}];\n"
+      },
+      "id": "8b2aef94-a645-46e1-ae51-63bb3d7a11ce",
+      "name": "Prepare All Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3376,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\n\nconst systemPrompt = `Ты — архитектор n8n воркфлоу. Твоя задача: по описанию бизнес-задачи создать ДЕТАЛЬНЫЙ ПЛАН воркфлоу.\n\nВерни ТОЛЬКО JSON (без markdown):\n{\n  \"workflowName\": \"...\",\n  \"summary\": \"1-2 предложения что делает воркфлоу\",\n  \"triggerType\": \"telegramTrigger|webhook|scheduleTrigger|executeWorkflowTrigger\",\n  \"nodes\": [\n    { \"name\": \"..\", \"type\": \"n8n-nodes-base.xxx\", \"purpose\": \"что делает\", \"inputFrom\": \"имя предыдущей ноды\", \"outputTo\": [\"имя следующей\"], \"criticalParams\": [\"url\", \"method\"] }\n  ],\n  \"dataTrace\": \"Trigger получает X → Router определяет action=Y → Switch направляет в ветку Z → ..\",\n  \"potentialPitfalls\": [\"Описание возможной проблемы и как её избежать\"],\n  \"needsStaticData\": true/false,\n  \"needsBinary\": true/false\n}\n\nПРАВИЛА ПЛАНИРОВАНИЯ:\n- Каждая нода должна иметь чёткое назначение\n- После КАЖДОГО HTTP Request добавь Code ноду для восстановления контекста\n- Telegram бот с командами → ОБЯЗАТЕЛЬНО Router+Config с $getWorkflowStaticData + Switch по action\n- Публикация в несколько платформ → ПОСЛЕДОВАТЕЛЬНАЯ цепочка, НЕ параллельные ветки\n- VK API = GET + queryParameters, ДВА разных токена (group/user)\n- Binary: последовательная передача, НЕ параллельные ветки\n- ВСЕГДА добавь Sticky Note с инструкцией\n- Минимум нод: не добавляй лишние если задача простая\n- НЕ делай circular connections (A→B→A) — для polling используй Schedule Trigger + HTTP Check\n- Для длительных async операций: 202 Accepted сразу + отдельный Schedule для проверки статуса`;\n\nconst userMsg = \"Задача: \" + ctx.businessTask + \"\\n\\nКонтекст: complexity=\" + ctx.complexity + \", pattern=\" + ctx.pattern + \", services=\" + ctx.services.join(\",\");\n\nconst requestBody = {\n  model: \"claude-sonnet-4-6\",\n  max_tokens: 20000,\n  thinking: { type: \"enabled\", budget_tokens: 15000 },\n  system: systemPrompt,\n  messages: [{ role: \"user\", content: userMsg }]\n};\n\nreturn [{ json: { ...ctx, anthropicPlanBody: JSON.stringify(requestBody) } }];"
+      },
+      "id": "eb5984aa-b996-415e-89a9-c0583e53eda9",
+      "name": "Prepare Plan Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3376,
+        2608
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "<ANTHROPIC_API_KEY>"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.anthropicPlanBody }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 300000
+        }
+      },
+      "id": "708ad67a-a70f-417b-aaca-7a2455bfd43f",
+      "name": "Plan Workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -3088,
+        2752
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst response = $input.first().json;\nconst ctx = $('Prepare All Context').first().json;\n\nlet planText = '';\nlet thinkingText = '';\n\nconst content = response.content || [];\nfor (const block of content) {\n  if (block.type === 'thinking') thinkingText += (block.thinking || '') + '\\n';\n  if (block.type === 'text') planText += (block.text || '');\n}\n\n// Parse plan JSON\nlet plan = null;\ntry {\n  let clean = planText.replace(/\\`\\`\\`json\\n?/g, '').replace(/\\n?\\`\\`\\`/g, '').trim();\n  const s = clean.indexOf('{'), e = clean.lastIndexOf('}');\n  if (s >= 0 && e > s) clean = clean.substring(s, e + 1);\n  plan = JSON.parse(clean);\n} catch(e) {\n  plan = { workflowName: 'Generated Workflow', summary: 'Auto-planned', nodes: [], dataTrace: '', potentialPitfalls: [], needsStaticData: false, needsBinary: false };\n}\n\nreturn [{ json: {\n  ...ctx,\n  plan,\n  planText: JSON.stringify(plan, null, 2),\n  thinkingText: thinkingText.substring(0, 3000)\n}}];\n"
+      },
+      "id": "f29ccf85-372c-46db-8cf2-1838aa7a442e",
+      "name": "Extract Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2784,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\n\n// ═══ SYSTEM PROMPT ═══\nconst systemParts = [];\n\n// Part 1: Role\nsystemParts.push(\"Ты — эксперт по n8n. Создай полный валидный JSON воркфлоу.\\nВерни ТОЛЬКО JSON объект без markdown, без \\`\\`\\`json, без текста до и после.\");\n\n// Part 2: Rules\nsystemParts.push(`ПРАВИЛА ГЕНЕРАЦИИ:\n\n[SCOPE] Реализуй ТОЛЬКО то что в плане. Простейшая архитектура.\n\n[СТРУКТУРА]\n- Корень: { name, nodes, connections, settings: {executionOrder:\"v1\"} }\n- Нода: { id (уникальный UUID), name (УНИКАЛЬНОЕ), type, typeVersion, position:[x,y], parameters }\n- Первая нода = триггер. Все ноды соединены. Connections по ИМЕНИ ноды.\n- typeVersion: httpRequest=4.2, code=2, telegramTrigger=1.1, switch=3.2, if=2.1, set=3.4, stickyNote=1, webhook=2, scheduleTrigger=1.2\n\n[CONNECTIONS]\n- Формат: \"ИмяНоды\": { main: [[{ node: \"Цель\", type: \"main\", index: 0 }]] }\n- IF: main[0]=true, main[1]=false\n- Switch expression: main[0], main[1], ... по количеству numberOutputs\n- Когда ветки сходятся: подключи ОБЕ к одной ноде через connections. БЕЗ Merge-ноды, БЕЗ try/catch\n- КАЖДАЯ нода (кроме триггера и Sticky) должна быть target хотя бы в одном connection\n- Sticky Note НЕ добавлять в connections\n\n[ПОСЛЕДОВАТЕЛЬНОСТЬ — КРИТИЧНО]\n- Публикация в несколько платформ = ПОСЛЕДОВАТЕЛЬНО: API_1 → Restore → API_2 → Restore → Notify\n- ЗАПРЕЩЕНО: параллельные ветки к одной Notify (она сработает несколько раз)\n\n[PARAMETERS — КРИТИЧНО]\n- HTTP Request: ВСЕГДА method + url\n- POST с телом: sendBody:true, specifyBody:\"json\", jsonBody (строка, начинается с =)\n- GET с параметрами: sendQueryParameters:true, queryParameters:{parameters:[{name,value}]}\n- HTTP options: { timeout:30000, response:{response:{neverError:true, responseFormat:\"json\"}} }\n- Скачивание файлов: responseFormat:\"file\"\n- НИКОГДА пустые parameters:{} на нодах с логикой\n- Code нода: поле jsCode (НЕ functionCode)\n\n[TELEGRAM BOT]\n- С командами и ответами: Router+Config (code) с $getWorkflowStaticData(\"global\") + Switch (expression) по action\n- cfg объект ВНУТРИ Router: токены, ID, настройки\n- НЕ используй $env для Telegram — всё в cfg\n- Switch output: { ask_post:0, process_post:1, ... }[$json.action] ?? N\n- ALWAYS: отмена (/cancel), авторизация (ALLOWED_CHAT_IDS), неизвестная команда\n- parse_mode: \"HTML\" ТОЛЬКО если текст генерируется воркфлоу (НЕ для пользовательского контента)\n\n[VK API]\n- GET + queryParameters (НЕ POST+JSON)\n- Группа: owner_id = \"-\"+GROUP_ID, VK_GROUP_TOKEN, from_group=1\n- Личная: owner_id = USER_ID, VK_USER_TOKEN\n- Сторис: 2 шага (getUploadServer → POST upload_url)\n\n[RESTORE CONTEXT — ОБЯЗАТЕЛЬНО]\n- После КАЖДОГО HTTP Request: Code нода восстановления:\n  const response = $input.first().json;\n  const ctx = $(\"ПредыдущаяНода\").first().json;\n  return [{ json: { ...ctx, apiResult: response } }];\n- Если HTTP скачивал файл (binary):\n  const item = $input.first();\n  return [{ json: { ...ctx }, binary: item.binary }];\n\n[BINARY FILES]\n- Передача через Code: return [{ json: {...}, binary: item.binary }]\n- ПОСЛЕДОВАТЕЛЬНО: скачать → upload 1 → upload 2\n- НЕЛЬЗЯ параллельные ветки с binary\n\n[ЗАПРЕЩЕНО]\n- n8n-nodes-base.function, n8n-nodes-base.executeCommand\n- process.env → используй $env.NAME или cfg\n- credentials в нодах\n- try/catch для $(\"A\").first() || $(\"B\").first()\n- Параллельные ветки с binary\n- Пустые parameters:{}\n- Circular connections (A→B→A)`);\n\n// Part 3: Sticky Note rule\nsystemParts.push(\"[STICKY NOTE] id: sticky-1, position: [240,-300], color: 3. Content: что делает, credentials, настройки, команды бота.\");\n\n// Part 4: API docs from context\nif (ctx.apiDocs) {\n  systemParts.push(\"=== API DOCUMENTATION ===\\n\" + ctx.apiDocs);\n}\n\nconst fullSystem = systemParts.join(\"\\n\\n\");\n\n// ═══ USER MESSAGE ═══\nconst userParts = [];\n\nuserParts.push(\"=== ПЛАН ВОРКФЛОУ (следуй ему точно) ===\");\nuserParts.push(ctx.planText || '');\n\nuserParts.push(\"\\n=== ЗАДАЧА ===\");\nuserParts.push(ctx.businessTask);\n\nif (ctx.ragTemplates && ctx.ragTemplateCount > 0) {\n  userParts.push(\"\\n=== ПРИМЕРЫ ПОХОЖИХ ВОРКФЛОУ (используй как структурный образец) ===\");\n  userParts.push((ctx.ragTemplates || '').substring(0, 15000));\n}\n\nif (ctx.nodesDocs) {\n  userParts.push(\"\\n=== NODE DOCUMENTATION ===\");\n  userParts.push((ctx.nodesDocs || '').substring(0, 10000));\n}\n\nif (ctx.failedTemplates && JSON.stringify(ctx.failedTemplates) !== '[]') {\n  userParts.push(\"\\nЭти шаблоны НЕ подошли, не повторяй:\");\n  userParts.push(JSON.stringify(ctx.failedTemplates).substring(0, 3000));\n}\n\nconst userMsg = userParts.join(\"\\n\");\n\nconst requestBody = {\n  model: \"claude-sonnet-4-6\",\n  max_tokens: 25000,\n  system: fullSystem,\n  messages: [{ role: \"user\", content: userMsg }]\n};\n\nreturn [{ json: {\n  ...ctx,\n  anthropicRequestBody: JSON.stringify(requestBody)\n}}];"
+      },
+      "id": "c566db2f-7400-4af6-ad61-c8004656b768",
+      "name": "Prepare Generate Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2784,
+        2608
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "<ANTHROPIC_API_KEY>"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.anthropicRequestBody }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 300000
+        }
+      },
+      "id": "a1f259e2-6347-45a1-9f23-304c127886f8",
+      "name": "Generate Workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -2480,
+        2752
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst response = $input.first().json;\n\nif (response.error) {\n  return [{ json: { text: '', error: response.error, businessTask: $('Trigger').first().json.businessTask, plan: $('Extract Plan').first().json.plan }}];\n}\n\nconst content = response.content || [];\nlet text = content.filter(b => b.type === 'text').map(b => b.text || '').join('');\n\nif (!text?.trim()) {\n  return [{ json: { text: '', error: { message: 'Claude returned empty response' }, businessTask: $('Trigger').first().json.businessTask, plan: $('Extract Plan').first().json.plan }}];\n}\n\ntext = text.replace(/^\\`\\`\\`json\\s*/i, '').replace(/\\s*\\`\\`\\`$/, '').trim();\nconst firstBrace = text.indexOf('{');\nconst lastBrace = text.lastIndexOf('}');\nif (firstBrace > 0 && lastBrace > firstBrace) text = text.substring(firstBrace, lastBrace + 1);\n\ntry {\n  const parsed = JSON.parse(text);\n  if ((parsed.nodes?.length || 0) <= 1) {\n    return [{ json: { text: '', error: { message: 'Too few nodes: ' + (parsed.nodes?.length || 0) }, businessTask: $('Trigger').first().json.businessTask, plan: $('Extract Plan').first().json.plan }}];\n  }\n} catch(e) {}\n\nreturn [{ json: {\n  text,\n  businessTask: $('Trigger').first().json.businessTask,\n  plan: $('Extract Plan').first().json.plan,\n  planText: $('Extract Plan').first().json.planText,\n  ragTemplates: $('Extract Plan').first().json.ragTemplates,\n  nodesDocs: $('Extract Plan').first().json.nodesDocs,\n  apiDocs: $('Extract Plan').first().json.apiDocs,\n  complexity: $('Extract Plan').first().json.complexity\n}}];\n"
+      },
+      "id": "718935b6-a784-4019-80b0-466617bdec77",
+      "name": "Extract Workflow",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2176,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst raw = $input.first().json.text || '';\nlet wf;\n\ntry {\n  let clean = raw.replace(/\\`\\`\\`json\\n?/g, '').replace(/\\n?\\`\\`\\`/g, '').trim();\n  const s = clean.indexOf('{'), e = clean.lastIndexOf('}');\n  if (s >= 0 && e > s) clean = clean.substring(s, e + 1);\n  wf = JSON.parse(clean);\n} catch (e) {\n  return [{ json: { valid: false, errors: ['JSON parse: ' + e.message], workflow: null, businessTask: $json.businessTask, plan: $json.plan, planText: $json.planText, ragTemplates: $json.ragTemplates, nodesDocs: $json.nodesDocs, apiDocs: $json.apiDocs, complexity: $json.complexity } }];\n}\n\nconst errors = [];\n\n// ═══ LAYER 1: SCHEMA COMPLIANCE ═══\nif (!wf.name) wf.name = 'Generated Workflow';\nif (!Array.isArray(wf.nodes) || !wf.nodes.length) errors.push('[SCHEMA] No nodes array');\nif (!wf.connections) errors.push('[SCHEMA] No connections');\n\nconst names = new Set();\n(wf.nodes || []).forEach((n, i) => {\n  if (!n.name) n.name = 'Node' + i;\n  if (!n.type) errors.push('[SCHEMA] ' + n.name + ': no type');\n  if (!n.id) n.id = 'n-' + i + '-' + Date.now().toString(36);\n  if (!n.typeVersion) n.typeVersion = 1;\n  if (!n.parameters) n.parameters = {};\n  if (!n.position) n.position = [250 + i * 220, 300];\n  if (names.has(n.name)) errors.push('[SCHEMA] Duplicate name: ' + n.name);\n  names.add(n.name);\n});\n\n// ═══ LAYER 2: NODE TYPE VALIDATION ═══\nconst knownNodePrefixes = ['n8n-nodes-base.', 'n8n-nodes-langchain.', '@n8n/'];\n(wf.nodes || []).forEach(n => {\n  if (n.type && !knownNodePrefixes.some(p => n.type.startsWith(p))) {\n    errors.push('[TYPE] ' + n.name + ': unknown node type prefix: ' + n.type);\n  }\n  // Check for non-existent node types\n  const banned = ['n8n-nodes-base.function', 'n8n-nodes-base.executeCommand', 'n8n-nodes-base.merge'];\n  if (banned.includes(n.type)) {\n    errors.push('[TYPE] ' + n.name + ': banned/deprecated type ' + n.type + '. Use n8n-nodes-base.code instead of function');\n  }\n});\n\n// ═══ LAYER 3: CONNECTION INTEGRITY ═══\nif (wf.connections) {\n  Object.entries(wf.connections).forEach(([src, conn]) => {\n    if (!names.has(src)) errors.push('[CONN] Source not found: ' + src);\n    (conn.main || []).forEach((outs, outIdx) => (outs || []).forEach(l => {\n      if (!names.has(l.node)) errors.push('[CONN] Target not found: ' + l.node + ' (from ' + src + ')');\n    }));\n  });\n}\n\n// Check for orphan nodes (not connected as target)\nconst targetNodes = new Set();\nObject.values(wf.connections || {}).forEach(conn => {\n  (conn.main || []).forEach(outs => (outs || []).forEach(l => targetNodes.add(l.node)));\n});\n(wf.nodes || []).forEach(n => {\n  if (!n.type?.toLowerCase().includes('trigger') && !n.type?.includes('webhook') && !n.type?.includes('stickyNote') && !targetNodes.has(n.name))\n    errors.push('[CONN] Orphan node (no incoming connection): ' + n.name);\n});\n\n// Check for circular connections (simple check: node connects to itself)\nObject.entries(wf.connections || {}).forEach(([src, conn]) => {\n  (conn.main || []).forEach(outs => (outs || []).forEach(l => {\n    if (l.node === src) errors.push('[CONN] Self-loop: ' + src);\n  }));\n});\n\n// ═══ LAYER 4: DAG VALIDATION ═══\nif (!wf.nodes?.some(n => n.type?.toLowerCase().includes('trigger') || n.type?.includes('webhook')))\n  errors.push('[DAG] No trigger node');\n\n// ═══ LAYER 5: PARAMETER COMPLETENESS ═══\n(wf.nodes || []).forEach(n => {\n  // Empty parameters on non-trivial nodes\n  if (n.type && !n.type.includes('Trigger') && !n.type.includes('stickyNote') && !n.type.includes('webhook')) {\n    if (!n.parameters || Object.keys(n.parameters).length === 0) errors.push('[PARAMS] ' + n.name + ': empty parameters');\n  }\n  // HTTP Request checks\n  if (n.type === 'n8n-nodes-base.httpRequest') {\n    if (!n.parameters.url) errors.push('[PARAMS] ' + n.name + ': HTTP without url');\n    if (!n.parameters.method) errors.push('[PARAMS] ' + n.name + ': HTTP without method');\n    // neverError check\n    const opts = n.parameters?.options?.response?.response;\n    if (!opts?.neverError) errors.push('[PARAMS] ' + n.name + ': HTTP without neverError:true');\n  }\n  // Code without jsCode\n  if (n.type === 'n8n-nodes-base.code' && !n.parameters.jsCode) errors.push('[PARAMS] ' + n.name + ': Code without jsCode');\n  // Switch without numberOutputs\n  if (n.type === 'n8n-nodes-base.switch' && n.parameters?.mode === 'expression' && !n.parameters.numberOutputs)\n    errors.push('[PARAMS] ' + n.name + ': Switch expression without numberOutputs');\n});\n\n// ═══ LAYER 6: LOGIC CHECKS ═══\nconst allJsCode = (wf.nodes || []).filter(n => n.type === 'n8n-nodes-base.code').map(n => n.parameters?.jsCode || '').join('\\n');\nconst taskLower = ($json.businessTask || '').toLowerCase();\n\n// 6a. Telegram bot without staticData\nconst hasTgTrigger = (wf.nodes || []).some(n => n.type?.includes('telegramTrigger'));\nconst hasStaticData = allJsCode.includes('getWorkflowStaticData');\nconst taskNeedsDialog = taskLower.includes('выложи') || taskLower.includes('команд') ||\n  (taskLower.includes('бот') && (taskLower.includes('текст') || taskLower.includes('фото') || taskLower.includes('сторис') || taskLower.includes('пост')));\nif (hasTgTrigger && taskNeedsDialog && !hasStaticData)\n  errors.push('[LOGIC] Telegram bot with dialog but no $getWorkflowStaticData');\n\n// 6b. process.env in Code\n(wf.nodes || []).forEach(n => {\n  if (n.type === 'n8n-nodes-base.code' && n.parameters?.jsCode?.includes('process.env'))\n    errors.push('[LOGIC] ' + n.name + ': process.env not available, use $env or cfg');\n});\n\n// 6c. VK via POST+JSON\n(wf.nodes || []).forEach(n => {\n  const url = n.parameters?.url || '';\n  if (url.includes('api.vk.com/method/') && n.parameters?.method === 'POST' && n.parameters?.specifyBody === 'json' && !url.includes('pu.vk.com'))\n    errors.push('[LOGIC] ' + n.name + ': VK API must use GET+queryParams, not POST+JSON');\n});\n\n// 6d. Parallel branches to single Notify\nconst incomingSources = {};\nObject.entries(wf.connections || {}).forEach(([src, conn]) => {\n  (conn.main || []).forEach(outs => (outs || []).forEach(l => {\n    if (!incomingSources[l.node]) incomingSources[l.node] = new Set();\n    incomingSources[l.node].add(src);\n  }));\n});\nObject.entries(incomingSources).forEach(([nodeName, sources]) => {\n  if (sources.size > 1) {\n    const node = (wf.nodes || []).find(n => n.name === nodeName);\n    if (node?.type === 'n8n-nodes-base.httpRequest') {\n      const url = node.parameters?.url || '';\n      const isNotify = url.includes('sendMessage') && (nodeName.toLowerCase().includes('notify') || nodeName.toLowerCase().includes('done') || nodeName.toLowerCase().includes('отчёт'));\n      if (isNotify) {\n        const sourceArr = Array.from(sources);\n        const sourceNodes = sourceArr.map(s => (wf.nodes || []).find(n => n.name === s));\n        const allRestore = sourceNodes.every(sn => sn?.type === 'n8n-nodes-base.code' && (sn.name.toLowerCase().includes('restore') || sn.name.toLowerCase().includes('after')));\n        if (allRestore && sources.size >= 2)\n          errors.push('[LOGIC] ' + nodeName + ': ' + sources.size + ' parallel Restore nodes → notification fires ' + sources.size + ' times. Use SEQUENTIAL chain');\n      }\n    }\n  }\n});\n\n// 6e. try/catch for $() node references\n(wf.nodes || []).forEach(n => {\n  if (n.type === 'n8n-nodes-base.code' && n.parameters?.jsCode) {\n    const code = n.parameters.jsCode;\n    if (code.includes('try') && code.includes('catch')) {\n      const refs = code.match(/\\$\\(['\"][^'\"]+['\"]\\)/g) || [];\n      if (new Set(refs).size >= 2 && code.includes('.first()'))\n        errors.push('[LOGIC] ' + n.name + ': try/catch between $() refs is unreliable. Connect both branches to same target node instead');\n    }\n  }\n});\n\n// 6f. Expression without = prefix (check jsonBody and url fields)\n(wf.nodes || []).forEach(n => {\n  if (n.type === 'n8n-nodes-base.httpRequest') {\n    const url = n.parameters?.url || '';\n    const jsonBody = n.parameters?.jsonBody || '';\n    if (url.includes('{{') && !url.startsWith('='))\n      errors.push('[LOGIC] ' + n.name + ': url with {{ }} must start with = prefix');\n    if (jsonBody.includes('{{') && !jsonBody.startsWith('='))\n      errors.push('[LOGIC] ' + n.name + ': jsonBody with {{ }} must start with = prefix');\n  }\n});\n\n// Classify severity\nconst critical = errors.filter(e => e.includes('[SCHEMA]') || e.includes('[CONN]') || e.includes('[DAG]') || e.includes('[LOGIC]'));\nconst warnings = errors.filter(e => e.includes('[PARAMS]') || e.includes('[TYPE]'));\n\n// Auto-set settings\nwf.settings = { executionOrder: 'v1' };\n\nreturn [{ json: {\n  valid: critical.length === 0,\n  errors,\n  errorCount: { critical: critical.length, warnings: warnings.length, total: errors.length },\n  workflow: wf,\n  businessTask: $json.businessTask,\n  plan: $json.plan,\n  planText: $json.planText,\n  ragTemplates: $json.ragTemplates,\n  nodesDocs: $json.nodesDocs,\n  apiDocs: $json.apiDocs,\n  complexity: $json.complexity\n}}];\n"
+      },
+      "id": "82a6452e-d015-42bd-bdcf-c2bb722a7fdf",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1888,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "v1",
+              "leftValue": "={{ $json.valid }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a0d4431b-40be-4df6-8318-5ca4fad42f9a",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1584,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://your-instance.app.n8n.cloud/api/v1/workflows",
+        "authentication": "<AUTHENTICATION>",
+        "genericAuthType": "<GENERICAUTHTYPE>",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.workflow) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "3345239d-7efd-4402-8ee7-eaaa77e58f7c",
+      "name": "Trial Upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -688,
+        2464
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a1",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8ad14bdf-5b19-4f62-81be-b2c4fa3e5c5c",
+      "name": "API Accepted?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -384,
+        2464
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=https://your-instance.app.n8n.cloud/api/v1/workflows/{{ $json.id }}",
+        "authentication": "<AUTHENTICATION>",
+        "genericAuthType": "<GENERICAUTHTYPE>",
+        "options": {}
+      },
+      "id": "9898dd47-210d-4b08-94f1-22d9e07a049e",
+      "name": "Delete Trial",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -80,
+        2464
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst wf = $('Validate').first().json.workflow;\nconst plan = $('Extract Plan').first().json.plan;\nreturn [{ json: {\n  success: true,\n  workflowJson: wf,\n  workflowName: wf.name,\n  businessTask: $('Trigger').first().json.businessTask,\n  plan: plan,\n  summary: 'Воркфлоу сгенерирован, прошёл валидацию и принят n8n API'\n}}];\n"
+      },
+      "id": "7dbc66b7-3382-4b31-b272-068b82d0f1f6",
+      "name": "Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        2464
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst response = $input.all()[0].json;\nlet errorDetail = response.message || (typeof response.error === 'string' ? response.error : JSON.stringify(response.error || response).substring(0, 500));\nreturn [{ json: {\n  success: false,\n  error: 'n8n API rejected: ' + errorDetail,\n  workflowJson: $('Validate').first().json.workflow,\n  businessTask: $('Trigger').first().json.businessTask,\n  summary: 'Воркфлоу прошёл валидацию но n8n API не принял: ' + errorDetail\n}}];\n"
+      },
+      "id": "443a267c-0670-4418-a517-7b196848d271",
+      "name": "API Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        2656
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "rc1",
+              "name": "retryCount",
+              "value": "={{ ($json.retryCount || 0) + 1 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "57cb82df-9149-4d82-a6d6-171101c273bb",
+      "name": "Retry Counter",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1280,
+        3264
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "mr1",
+              "leftValue": "={{ $json.retryCount }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "66912b30-ec9c-4b38-88c4-4b4ec98f608b",
+      "name": "Max Retries?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -976,
+        3264
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst retryCount = $json.retryCount || 1;\n// Retry 1-2: Sonnet repairs. Retry 3+: Opus regeneration from scratch\nconst useOpus = retryCount >= 3;\nconst model = useOpus ? 'claude-opus-4-6' : 'claude-sonnet-4-6';\n\nreturn [{ json: {\n  ...$json,\n  repairModel: model,\n  isRegeneration: useOpus\n}}];\n"
+      },
+      "id": "625f8685-03db-47bc-a419-6656f21a7415",
+      "name": "Choose Repair Model",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -688,
+        3456
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst isRegen = data.isRegeneration;\n\nlet prompt;\nif (isRegen) {\n  prompt = \"Предыдущая попытка генерации провалилась с ошибками:\\n\" + JSON.stringify(data.errors) + \"\\n\\nОригинальный план:\\n\" + (data.planText || '') + \"\\n\\nЗадача: \" + data.businessTask + \"\\n\\nСгенерируй воркфлоу ЗАНОВО с нуля, избегая перечисленных ошибок.\\nВерни ТОЛЬКО JSON без обёрток.\";\n} else {\n  prompt = \"В JSON воркфлоу найдены ошибки:\\n\" + JSON.stringify(data.errors) + \"\\n\\nВот JSON:\\n\" + JSON.stringify(data.workflow) + \"\\n\\nИсправь ВСЕ ошибки и верни ТОЛЬКО исправленный JSON без обёрток.\";\n}\n\nconst requestBody = {\n  model: data.repairModel,\n  max_tokens: 30000,\n  messages: [{ role: \"user\", content: prompt }]\n};\n\nreturn [{ json: { ...data, anthropicRepairBody: JSON.stringify(requestBody) } }];"
+      },
+      "id": "4cb3fb4f-7d6c-46cf-86b0-f89360b986b6",
+      "name": "Prepare Repair Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -688,
+        3296
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "<ANTHROPIC_API_KEY>"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.anthropicRepairBody }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 300000
+        }
+      },
+      "id": "268e111b-56cd-4ec0-9115-5d88131af191",
+      "name": "Repair",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -384,
+        3456
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst data = $input.first().json;\nreturn [{ json: {\n  success: false,\n  error: 'Validation failed after ' + (data.retryCount || 0) + ' repair attempts',\n  errors: data.errors || [],\n  workflowJson: data.workflow,\n  businessTask: data.businessTask,\n  summary: 'Воркфлоу не прошёл валидацию после макс. попыток ремонта. JSON прилагается для ручной доработки.'\n}}];\n"
+      },
+      "id": "b14d7aee-69d0-45cb-a6d4-612872e18613",
+      "name": "Validation Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -688,
+        3152
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## n8n Workflow Builder v2.0\n\n### Архитектура (7 стадий)\n1. **Classify** — определение сложности и паттерна задачи\n2. **RAG** — поиск похожих шаблонов (sub-workflow)\n3. **MCP Docs** — документация нод и API (с hardcoded fallback)\n4. **Planning** — Sonnet + extended thinking, детальный план с data trace\n5. **Generation** — Sonnet, генерация JSON по плану + шаблонам\n6. **Validation** — 6 слоёв проверок (schema → types → connections → DAG → params → logic)\n7. **Repair** — до 3 попыток: Sonnet x2 → Opus (регенерация с нуля)\n\n### Настройка\n- Установить переменную среды RAG_WORKFLOW_ID = ID вашего RAG sub-workflow\n- Настроить HTTP Header Auth credential для n8n API\n- Anthropic API ключ уже встроен\n\n### Модели\n- **Sonnet 4.6** — планирование, генерация, ремонт (попытки 1-2)\n- **Opus 4.6** — эскалация при застревании (попытка 3, регенерация с нуля)\n\n### Стоимость\n- Типичная: $0.15-0.40 за генерацию\n- С ремонтом: до $1-2\n- С Opus эскалацией: до $3-4",
+        "height": 700,
+        "width": 900,
+        "color": 3
+      },
+      "id": "3511cfc8-367a-4060-8ef1-efc3f7dae9d0",
+      "name": "Инструкция",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -7488,
+        1952
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://your-service.example.com/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "<AUTHORIZATION>"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", method: \"tools/call\", params: { name: \"get_node\", arguments: { nodeType: ($json.nodeTypes && $json.nodeTypes[0]) || 'n8n-nodes-base.httpRequest', detail: \"full\" } }, id: 10 }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "94ebd191-0566-4109-bcf2-84caef44533c",
+      "name": "MCP: Get Node ",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -5488,
+        2752
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://your-service.example.com/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "<AUTHORIZATION>"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", method: \"tools/call\", params: { name: \"get_node\", arguments: { nodeType: $json.nextNodeType || 'n8n-nodes-base.set', detail: \"full\" } }, id: 11 }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "ee9ed78b-5bef-4f86-9b39-ac0e65f1b166",
+      "name": "MCP: Get Node 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -4880,
+        2752
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://your-service.example.com/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", method: \"tools/call\", params: { name: \"get_api_docs\", arguments: { service_name: $json.apiServiceFound || 'http' } }, id: 21 }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "93660abf-6c98-4756-ba66-2652edcfc389",
+      "name": "MCP: Get API Docs1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -3680,
+        2752
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst item = $input.first().json;\nconst wf = item.workflow;\nconst fixes = [];\n\nif (!wf || !wf.nodes) return [{ json: item }];\n\n// FIX 1: neverError + responseFormat + timeout on all HTTP\nwf.nodes.forEach(n => {\n  if (n.type === 'n8n-nodes-base.httpRequest') {\n    if (!n.parameters.options) n.parameters.options = {};\n    if (!n.parameters.options.response) n.parameters.options.response = {};\n    if (!n.parameters.options.response.response) n.parameters.options.response.response = {};\n    if (!n.parameters.options.response.response.neverError) {\n      n.parameters.options.response.response.neverError = true;\n      fixes.push(n.name + ': +neverError');\n    }\n    if (!n.parameters.options.response.response.responseFormat) {\n      const url = n.parameters.url || '';\n      n.parameters.options.response.response.responseFormat = url.includes('/file/bot') ? 'file' : 'json';\n      fixes.push(n.name + ': +responseFormat');\n    }\n    if (!n.parameters.options.timeout) {\n      n.parameters.options.timeout = 30000;\n      fixes.push(n.name + ': +timeout');\n    }\n  }\n});\n\n// FIX 2: Remove credentials\nwf.nodes.forEach(n => { if (n.credentials) { delete n.credentials; fixes.push(n.name + ': -credentials'); } });\n\n// FIX 3: settings\nwf.settings = { executionOrder: 'v1' };\n\n// FIX 4: Fix overlapping positions\nconst posMap = new Map();\nwf.nodes.forEach(n => {\n  if (!n.position) n.position = [250, 300];\n  const key = n.position[0] + ',' + n.position[1];\n  if (posMap.has(key)) { n.position = [n.position[0], n.position[1] + 200]; fixes.push(n.name + ': shifted position'); }\n  posMap.set(n.position[0] + ',' + n.position[1], n.name);\n});\n\n// FIX 5: typeVersion defaults\nconst tvDefaults = { 'n8n-nodes-base.httpRequest': 4.2, 'n8n-nodes-base.code': 2, 'n8n-nodes-base.telegramTrigger': 1.1, 'n8n-nodes-base.switch': 3.2, 'n8n-nodes-base.if': 2.1, 'n8n-nodes-base.set': 3.4, 'n8n-nodes-base.stickyNote': 1, 'n8n-nodes-base.webhook': 2, 'n8n-nodes-base.scheduleTrigger': 1.2, 'n8n-nodes-base.googleSheets': 4.5 };\nwf.nodes.forEach(n => {\n  if (!n.typeVersion) { n.typeVersion = tvDefaults[n.type] || 1; fixes.push(n.name + ': +typeVersion'); }\n});\n\n// FIX 6: process.env → $env\nwf.nodes.forEach(n => {\n  if (n.type === 'n8n-nodes-base.code' && n.parameters?.jsCode?.includes('process.env.')) {\n    n.parameters.jsCode = n.parameters.jsCode.replace(/process\\.env\\.(\\w+)/g, '\\$env.$1');\n    fixes.push(n.name + ': process.env→$env');\n  }\n});\n\n// FIX 7: function → code\nwf.nodes.forEach(n => {\n  if (n.type === 'n8n-nodes-base.function') {\n    n.type = 'n8n-nodes-base.code'; n.typeVersion = 2;\n    if (n.parameters.functionCode && !n.parameters.jsCode) { n.parameters.jsCode = n.parameters.functionCode; delete n.parameters.functionCode; }\n    fixes.push(n.name + ': function→code');\n  }\n});\n\n// FIX 8: Unique IDs\nconst usedIds = new Set();\nwf.nodes.forEach((n, i) => {\n  if (!n.id || usedIds.has(n.id)) { n.id = 'node-' + i + '-' + Date.now().toString(36); fixes.push(n.name + ': +uniqueId'); }\n  usedIds.add(n.id);\n});\n\n// FIX 9: Expression = prefix\nwf.nodes.forEach(n => {\n  if (n.type === 'n8n-nodes-base.httpRequest') {\n    ['url', 'jsonBody'].forEach(field => {\n      if (n.parameters[field] && n.parameters[field].includes('{{') && !n.parameters[field].startsWith('=')) {\n        n.parameters[field] = '=' + n.parameters[field];\n        fixes.push(n.name + ': +expression prefix on ' + field);\n      }\n    });\n  }\n});\n\nreturn [{ json: { ...item, workflow: wf, autoFixes: fixes } }];\n"
+      },
+      "id": "603bd48b-3949-444d-bbc3-02703278b2bf",
+      "name": "Auto-Fix1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1280,
+        2464
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst item = $input.first().json;\nconst wf = item.workflow;\nconst cleanWorkflow = {\n  name: wf.name || 'Generated Workflow',\n  nodes: (wf.nodes || []).map(({ credentials, ...n }) => n),\n  connections: wf.connections || {},\n  settings: wf.settings || { executionOrder: 'v1' }\n};\nreturn [{ json: { workflow: cleanWorkflow, businessTask: item.businessTask } }];\n"
+      },
+      "id": "9ca18afe-68b3-41a6-b1d1-8c050e069e4b",
+      "name": "Clean Workflow1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -976,
+        2464
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst response = $input.first().json;\nconst ctx = $('Choose Repair Model').first().json;\n\nconst content = response.content || [];\nlet text = content.filter(b => b.type === 'text').map(b => b.text || '').join('');\ntext = text.replace(/^\\`\\`\\`json\\s*/i, '').replace(/\\s*\\`\\`\\`$/, '').trim();\nconst s = text.indexOf('{'), e = text.lastIndexOf('}');\nif (s >= 0 && e > s) text = text.substring(s, e + 1);\n\nreturn [{ json: {\n  text,\n  businessTask: ctx.businessTask,\n  plan: ctx.plan,\n  planText: ctx.planText,\n  ragTemplates: ctx.ragTemplates,\n  nodesDocs: ctx.nodesDocs,\n  apiDocs: ctx.apiDocs,\n  complexity: ctx.complexity,\n  retryCount: ctx.retryCount\n}}];\n"
+      },
+      "id": "474cefd5-5f9b-46ad-b1d8-3718df5701d3",
+      "name": "Extract Fix1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        3456
+      ]
+    }
+  ],
+  "connections": {
+    "Restore After Search": {
+      "main": [
+        []
+      ]
+    },
+    "MCP: Поиск нод": {
+      "main": [
+        [
+          {
+            "node": "Парсинг нод1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP: Get Node 1": {
+      "main": [
+        [
+          {
+            "node": "Save Node 1 Doc1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP: Get Node 2": {
+      "main": [
+        [
+          {
+            "node": "Собрать Node Docs1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP: Поиск API": {
+      "main": [
+        [
+          {
+            "node": "Парсинг API search1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP: Get API Docs": {
+      "main": [
+        [
+          {
+            "node": "Подготовить всё",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Подготовить всё": {
+      "main": [
+        [
+          {
+            "node": "Генерация2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Workflow": {
+      "main": [
+        [
+          {
+            "node": "Пробная загрузка2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Fix": {
+      "main": [
+        [
+          {
+            "node": "Валидация2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Контекст3": {
+      "main": [
+        [
+          {
+            "node": "Planning1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Planning1": {
+      "main": [
+        [
+          {
+            "node": "Extract Plan1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Plan1": {
+      "main": [
+        [
+          {
+            "node": "MCP: Поиск нод",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Парсинг нод1": {
+      "main": [
+        [
+          {
+            "node": "MCP: Get Node 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Node 1 Doc1": {
+      "main": [
+        [
+          {
+            "node": "MCP: Get Node 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Собрать Node Docs1": {
+      "main": [
+        [
+          {
+            "node": "MCP: Поиск API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Парсинг API search1": {
+      "main": [
+        [
+          {
+            "node": "MCP: Get API Docs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Генерация2": {
+      "main": [
+        [
+          {
+            "node": "Extract3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract3": {
+      "main": [
+        [
+          {
+            "node": "Валидация2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Валидация2": {
+      "main": [
+        [
+          {
+            "node": "Валидно?2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Валидно?2": {
+      "main": [
+        [
+          {
+            "node": "Auto-Fix",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Счётчик попыток2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Пробная загрузка2": {
+      "main": [
+        [
+          {
+            "node": "API принял?2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API принял?2": {
+      "main": [
+        [
+          {
+            "node": "Удалить пробный2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ошибка API2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Удалить пробный2": {
+      "main": [
+        [
+          {
+            "node": "Результат2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Счётчик попыток2": {
+      "main": [
+        [
+          {
+            "node": "Попытки исчерпаны?2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Попытки исчерпаны?2": {
+      "main": [
+        [
+          {
+            "node": "Ошибка валидации2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Исправление2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Исправление2": {
+      "main": [
+        [
+          {
+            "node": "Extract Fix",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Исправление3": {
+      "main": [
+        []
+      ]
+    },
+    "Auto-Fix": {
+      "main": [
+        [
+          {
+            "node": "Clean Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger": {
+      "main": [
+        [
+          {
+            "node": "Classify Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Task": {
+      "main": [
+        [
+          {
+            "node": "RAG: Fetch Templates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: Fetch Templates": {
+      "main": [
+        [
+          {
+            "node": "Parse RAG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse RAG": {
+      "main": [
+        [
+          {
+            "node": "MCP: Search Nodes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP: Search Nodes": {
+      "main": [
+        [
+          {
+            "node": "Parse Nodes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Nodes": {
+      "main": [
+        [
+          {
+            "node": "MCP: Get Node ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Node 1": {
+      "main": [
+        [
+          {
+            "node": "MCP: Get Node 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Node Docs": {
+      "main": [
+        [
+          {
+            "node": "MCP: Search API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP: Search API": {
+      "main": [
+        [
+          {
+            "node": "Parse API Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse API Search": {
+      "main": [
+        [
+          {
+            "node": "MCP: Get API Docs1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan Workflow": {
+      "main": [
+        [
+          {
+            "node": "Extract Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Workflow": {
+      "main": [
+        [
+          {
+            "node": "Extract Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Workflow": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Auto-Fix1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Retry Counter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trial Upload": {
+      "main": [
+        [
+          {
+            "node": "API Accepted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API Accepted?": {
+      "main": [
+        [
+          {
+            "node": "Delete Trial",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "API Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Trial": {
+      "main": [
+        [
+          {
+            "node": "Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry Counter": {
+      "main": [
+        [
+          {
+            "node": "Max Retries?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Max Retries?": {
+      "main": [
+        [
+          {
+            "node": "Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Choose Repair Model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Repair": {
+      "main": [
+        [
+          {
+            "node": "Extract Fix1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Plan": {
+      "main": [
+        [
+          {
+            "node": "Prepare Generate Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Generate Request": {
+      "main": [
+        [
+          {
+            "node": "Generate Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare All Context": {
+      "main": [
+        [
+          {
+            "node": "Prepare Plan Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Plan Request": {
+      "main": [
+        [
+          {
+            "node": "Plan Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Choose Repair Model": {
+      "main": [
+        [
+          {
+            "node": "Prepare Repair Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Repair Request": {
+      "main": [
+        [
+          {
+            "node": "Repair",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP: Get Node ": {
+      "main": [
+        [
+          {
+            "node": "Save Node 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP: Get Node 3": {
+      "main": [
+        [
+          {
+            "node": "Collect Node Docs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP: Get API Docs1": {
+      "main": [
+        [
+          {
+            "node": "Prepare All Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto-Fix1": {
+      "main": [
+        [
+          {
+            "node": "Clean Workflow1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Workflow1": {
+      "main": [
+        [
+          {
+            "node": "Trial Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Fix1": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  }
+}

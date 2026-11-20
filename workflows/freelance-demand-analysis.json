@@ -1,0 +1,511 @@
+{
+  "name": "Freelance Demand Analysis",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "247bec8f-f1af-47bd-8b79-a8f3a596a25f",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -496,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.apify.com/v2/datasets/<DATASET_ID>/items?format=json&clean=true",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "933c8b16-7985-4431-af90-6ac90eae3ee5",
+      "name": "Fetch Apify Dataset",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -272,
+        384
+      ],
+      "notesInFlow": true,
+      "notes": "ВСТАВЬ СВОЮ ССЫЛКУ: замени URL на shareable link из Apify. Формат: https://api.apify.com/v2/datasets/DATASET_ID/items?token=TOKEN&format=json"
+    },
+    {
+      "parameters": {
+        "jsCode": "const allItems = $input.all().map(i => i.json);\nconst seen = new Set();\nconst cleaned = [];\n\nfor (const item of allItems) {\n    if (!item.title || item.title === '__EMPTY__') continue;\n    \n    const normalizedTitle = item.title\n        .toLowerCase()\n        .replace(/\\s+/g, ' ')\n        .trim();\n    \n    if (seen.has(normalizedTitle)) continue;\n    seen.add(normalizedTitle);\n    \n    cleaned.push({\n        json: {\n            title: item.title,\n            description: (item.description || '').substring(0, 300),\n            price: item.price || 0,\n            price_text: item.price_text || '',\n            higher_price: item.higher_price || 0,\n            search_keyword: item.search_keyword || item.fl_category || '',\n            offers_count: item.offers_count || 0,\n            payer_stats: item.payer_stats || '',\n            url: item.url || '',\n            date: item.date || ''\n        }\n    });\n}\n\ncleaned.sort((a, b) => (b.json.price || 0) - (a.json.price || 0));\nreturn cleaned;"
+      },
+      "id": "eb928641-3e44-4c2b-ad41-0f6c019ee052",
+      "name": "Deduplicate & Clean",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -48,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 15,
+        "options": {}
+      },
+      "id": "a6e22490-1705-4d73-b0c6-e81bcb73b5cb",
+      "name": "Batch by 15",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        176,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== ФОРМИРУЕМ БАТЧ ДЛЯ LLM =====\nconst items = $input.all();\nconst batch = items.map((item, i) => ({\n    id: i,\n    title: item.json.title,\n    description: item.json.description,\n    price: item.json.price,\n    keyword: item.json.search_keyword\n}));\n\nreturn [{ json: { batch: JSON.stringify(batch, null, 2), count: items.length } }];"
+      },
+      "id": "3c6d4385-940b-4a5d-b103-b1748bc98f5c",
+      "name": "Prepare Batch for LLM",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== МЕРЖИМ РЕЗУЛЬТАТЫ LLM С ОРИГИНАЛЬНЫМИ ДАННЫМИ =====\nconst llmResponse = $input.first().json;\n\nlet classifications;\ntry {\n    // Универсальный поиск — ищем results в любой структуре\n    const raw = JSON.stringify(llmResponse);\n    \n    // Находим {\"results\": [...]} в любом месте ответа\n    const match = raw.match(/\"results\"\\s*:\\s*\\[/);\n    if (!match) throw new Error('No results array found');\n    \n    // Извлекаем JSON начиная с найденного results\n    const startIdx = raw.lastIndexOf('{', match.index);\n    let depth = 0;\n    let endIdx = startIdx;\n    for (let i = startIdx; i < raw.length; i++) {\n        if (raw[i] === '{' || raw[i] === '[') depth++;\n        if (raw[i] === '}' || raw[i] === ']') depth--;\n        if (depth === 0) { endIdx = i + 1; break; }\n    }\n    \n    let jsonStr = raw.substring(startIdx, endIdx);\n    // Убираем экранирование если строка была внутри другой строки\n    if (jsonStr.includes('\\\\\"')) {\n        jsonStr = jsonStr.replace(/\\\\\"/g, '\"').replace(/\\\\n/g, ' ');\n    }\n    \n    const parsed = JSON.parse(jsonStr);\n    classifications = parsed.results;\n} catch(e) {\n    return [{ json: { error: 'LLM parse failed: ' + e.message, raw: JSON.stringify(llmResponse).substring(0, 1000) } }];\n}\n\n// Достаём оригинальные данные из батча\nconst batchItems = $('Batch by 15').all();\n\nconst results = [];\nfor (const cls of classifications) {\n    const original = batchItems[cls.id]?.json || {};\n    \n    results.push({\n        json: {\n            title: original.title || '',\n            description: original.description || '',\n            price: original.price || 0,\n            price_text: original.price_text || '',\n            search_keyword: original.search_keyword || '',\n            url: original.url || '',\n            category: cls.category || 'other',\n            subcategory: cls.subcategory || '',\n            complexity: cls.complexity || 'medium',\n            can_automate: cls.can_automate || false\n        }\n    });\n}\n\nreturn results;"
+      },
+      "id": "a834f147-9eba-4634-a139-6226eeb65cb6",
+      "name": "Merge LLM + Original",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1088,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "<DOCUMENTID>",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 463164767,
+          "mode": "list",
+          "cachedResultName": "Freelance_ru "
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Ссылка": "={{ $json.url }}",
+            "Можно автоматизировать": "={{ $json.can_automate }}",
+            "Сложность": "={{ $json.complexity }}",
+            "Подкатегория": "={{ $json.subcategory }}",
+            "Категория": "={{ $json.category }}",
+            "Ключевое слово": "={{ $json.search_keyword }}",
+            "Описание": "={{ $json.description }}",
+            "Заголовок": "={{ $json.title }}",
+            "Цена": "={{ $json.price }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Категория",
+              "displayName": "Категория",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Подкатегория",
+              "displayName": "Подкатегория",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Заголовок",
+              "displayName": "Заголовок",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Описание",
+              "displayName": "Описание",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Цена",
+              "displayName": "Цена",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Ключевое слово",
+              "displayName": "Ключевое слово",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Сложность",
+              "displayName": "Сложность",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Можно автоматизировать",
+              "displayName": "Можно автоматизировать",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Ссылка",
+              "displayName": "Ссылка",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "28d422bf-be94-4276-8594-05592aa884b4",
+      "name": "Write Raw to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1312,
+        384
+      ],
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== ФИНАЛЬНАЯ АГРЕГАЦИЯ =====\n// Считаем статистику по категориям\n\nconst allItems = $('Merge LLM + Original').all().map(i => i.json);\n\nconst groups = {};\nfor (const item of allItems) {\n    if (item.error) continue;\n    const cat = item.category || 'other';\n    \n    if (!groups[cat]) {\n        groups[cat] = {\n            category: cat,\n            count: 0,\n            total_price: 0,\n            prices: [],\n            subcategories: {},\n            examples: [],\n            automatable: 0,\n            complexity: { simple: 0, medium: 0, complex: 0 },\n            keywords: {}\n        };\n    }\n    \n    const g = groups[cat];\n    g.count++;\n    \n    if (item.price) {\n        g.prices.push(item.price);\n        g.total_price += item.price;\n    }\n    \n    if (item.can_automate) g.automatable++;\n    if (item.complexity) g.complexity[item.complexity] = (g.complexity[item.complexity] || 0) + 1;\n    \n    // Подкатегории\n    const sub = item.subcategory || 'прочее';\n    g.subcategories[sub] = (g.subcategories[sub] || 0) + 1;\n    \n    // Ключевые слова\n    const kw = item.search_keyword || 'unknown';\n    g.keywords[kw] = (g.keywords[kw] || 0) + 1;\n    \n    // Примеры (макс 3)\n    if (g.examples.length < 3) {\n        g.examples.push(item.title.substring(0, 80));\n    }\n}\n\n// Формируем выход\nconst output = Object.values(groups)\n    .map(g => {\n        const avgPrice = g.prices.length \n            ? Math.round(g.total_price / g.prices.length) \n            : 0;\n        const medianPrice = g.prices.length \n            ? g.prices.sort((a,b) => a-b)[Math.floor(g.prices.length/2)] \n            : 0;\n        \n        return {\n            category: g.category,\n            count: g.count,\n            avg_price: avgPrice,\n            median_price: medianPrice,\n            automatable_pct: Math.round(g.automatable / g.count * 100),\n            top_subcategories: Object.entries(g.subcategories)\n                .sort((a,b) => b[1] - a[1])\n                .slice(0, 5)\n                .map(([name, cnt]) => `${name} (${cnt})`)\n                .join('; '),\n            top_keywords: Object.entries(g.keywords)\n                .sort((a,b) => b[1] - a[1])\n                .slice(0, 5)\n                .map(([name, cnt]) => `${name} (${cnt})`)\n                .join('; '),\n            examples: g.examples.join(' | '),\n            complexity_breakdown: `simple:${g.complexity.simple || 0} med:${g.complexity.medium || 0} complex:${g.complexity.complex || 0}`\n        };\n    })\n    .sort((a,b) => b.count - a.count);\n\nreturn output.map(item => ({ json: item }));"
+      },
+      "id": "3cfd685d-f7c8-4842-a315-20a1ab9f6d31",
+      "name": "Aggregate Stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-5-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-5-MINI"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "={{ $json.batch }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "instructions": "=Ты — аналитик фриланс-рынка. Классифицируй заказы с фриланс-биржи.\n\nДля КАЖДОГО заказа определи:\n\n1. category — СТРОГО одна из:\n  - telegram_bot_ai (ТГ-бот с ИИ: консультант, ассистент, ChatGPT)\n  - telegram_bot_basic (ТГ-бот без ИИ: рассылки, каталоги, оплата)\n  - ai_content (генерация текста/картинок/видео через нейросети)\n  - automation (автоматизация процессов, интеграция сервисов, n8n, Make)\n  - parsing (парсинг, скрейпинг, мониторинг)\n  - crm_integration (интеграция CRM: Битрикс24, AmoCRM, 1С)\n  - website_dev (сайты, лендинги, магазины)\n  - voice_ai (голосовые боты, озвучка)\n  - data_processing (обработка данных, Excel, отчёты)\n  - other (ничего из вышеперечисленного)\n\n2. subcategory — уточнение в 3-7 слов\n3. complexity — simple / medium / complex\n4. can_automate — true если можно сделать через n8n/Make, false если нет\n\nВерни ТОЛЬКО JSON: {\"results\": [{\"id\": 0, \"category\": \"...\", \"subcategory\": \"...\", \"complexity\": \"...\", \"can_automate\": true}]}",
+          "textFormat": {
+            "textOptions": {
+              "type": "json_object"
+            }
+          }
+        }
+      },
+      "id": "a2b9b9de-c781-4866-a532-155bc6e6914e",
+      "name": "Classify Orders with AI",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        752,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "<DOCUMENTID>",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 360462096,
+          "mode": "list",
+          "cachedResultName": "Freelance_ru_С��одка"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Категория": "={{ $json.category }}",
+            "Кол-во заказов": "={{ $json.count }}",
+            "Средняя цена": "={{ $json.avg_price }}",
+            "Медианная цена": "={{ $json.median_price }}",
+            "% автоматизируемых": "={{ $json.automatable_pct }}",
+            "Топ подкатегории": "={{ $json.top_subcategories }}",
+            "Топ ключевые слова": "={{ $json.top_keywords }}",
+            "Примеры заказов": "={{ $json.examples }}",
+            "Сложность": "={{ $json.complexity_breakdown }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Категория",
+              "displayName": "Категория",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Кол-во заказов",
+              "displayName": "Кол-во заказов",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Средняя цена",
+              "displayName": "Средняя цена",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Медианная цена",
+              "displayName": "Медианная цена",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "% автоматизируемых",
+              "displayName": "% автоматизируемых",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Топ подкатегории",
+              "displayName": "Топ подкатегории",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Топ ключевые слова",
+              "displayName": "Топ ключевые слова",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Примеры заказов",
+              "displayName": "Примеры заказов",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Сложность",
+              "displayName": "Сложность",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "4d4c4c04-9760-425a-a387-82ca89246f5b",
+      "name": "Write Summary to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        720,
+        192
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Apify Dataset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Apify Dataset": {
+      "main": [
+        [
+          {
+            "node": "Deduplicate & Clean",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deduplicate & Clean": {
+      "main": [
+        [
+          {
+            "node": "Batch by 15",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch by 15": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Stats",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Batch for LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Batch for LLM": {
+      "main": [
+        [
+          {
+            "node": "Classify Orders with AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge LLM + Original": {
+      "main": [
+        [
+          {
+            "node": "Write Raw to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Raw to Sheets": {
+      "main": [
+        [
+          {
+            "node": "Batch by 15",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Stats": {
+      "main": [
+        [
+          {
+            "node": "Write Summary to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Orders with AI": {
+      "main": [
+        [
+          {
+            "node": "Merge LLM + Original",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  }
+}
